@@ -1198,7 +1198,17 @@ Se não conseguires extrair os dados:
   // === PROCESSAR TEXTO (MELHORADO) ===
   async processarTexto(mensagem, remetente, timestamp, configGrupo = null) {
     console.log(`   📝 Analisando mensagem: "${mensagem}"`);
-    
+
+    // IGNORAR COMANDOS ADMIN/BOT (não processar como comprovante)
+    if (mensagem.startsWith('.')) {
+      console.log(`   🤖 Comando detectado - ignorando processamento de comprovante`);
+      return {
+        sucesso: false,
+        tipo: 'comando_ignorado',
+        mensagem: null
+      };
+    }
+
     // VERIFICAR PEDIDOS ESPECÍFICOS PRIMEIRO
     if (configGrupo) {
       const pedidosEspecificos = this.analisarPedidosEspecificos(mensagem, configGrupo);

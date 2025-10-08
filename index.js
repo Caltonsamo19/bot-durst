@@ -983,6 +983,20 @@ async function salvarDadosReferencia() {
     }
 }
 
+// Função para agendar salvamento com debounce
+let timeoutSalvamento = null;
+
+function agendarSalvamento() {
+    if (timeoutSalvamento) {
+        clearTimeout(timeoutSalvamento);
+    }
+
+    timeoutSalvamento = setTimeout(async () => {
+        await salvarDadosReferencia();
+        timeoutSalvamento = null;
+    }, 3000); // 3 segundos de debounce
+}
+
 // === CACHE DE TRANSAÇÕES (SEM ARQUIVOS .TXT) ===
 function adicionarTransacaoCache(dados, grupoId) {
     const key = `${grupoId}_${Date.now()}_${Math.random()}`;
@@ -1653,44 +1667,127 @@ const MODERACAO_CONFIG = {
 
 // Configuração para cada grupo
 const CONFIGURACAO_GRUPOS = {
-      '120363402302455817@g.us': {
-        nome: 'KA-NET',
-        tabela: `SUPER PROMOÇÃO NA VODACOM🛑🔥😍
+        '258840161370-1471468657@g.us': {
+        nome: 'Venda Automática 24/7',
+        tabela: `TABELA ATUALIZADA 
+Outubro 2025🥳🥳
+Pacotes exclusivos apenas para Vodacom🔴🔴
+Pacotes Diários, Semanais (Renováveis) e Mensal 
+___________________________
 
-📆 PACOTES DIÁRIOS
-512MB = 10MT
-1024MB = 16MT
-1200MB = 20MT
-1560MB = 25MT
-2048MB = 32MT
-3200MB = 54MT 
-4250MB = 68MT 
-5350MB = 90MT 
-10240MB = 160MT
+ PACOTE DIÁRIO BÁSICO( 24H⏱) 
+1024MB    - 17,00 MT
+1200MB    - 20,00 MT
+2048MB   - 34,00 MT
+2200MB    - 40,00 MT
+3096MB    - 51,00 MT
+4096MB    - 68,00 MT
+5120MB     - 85,00 MT
+6144MB    - 102,00 MT
+7168MB    - 119,00 MT
+8192MB    - 136,00 MT
+9144MB    - 153,00 MT
+10240MB  - 170,00 MT
 
-📅 PACOTE DIÁRIO PREMIUM (3 Dias)
-2000 + 300MB = 44MT
-3000 + 300MB = 66MT 
-4000 + 300MB = 88MT 
-5000 + 300MB = 109MT
-6000 + 300MB = 133MT 
-7000 + 300MB = 149MT 
-10000 + 300MB = 219MT 
+ PACOTE DIÁRIO PREMIUM ( 3 DIAS 🗓) 
+Megabyte Renováveis! 
+2000MB  - 44,00 MT
+3000MB  - 66,00 MT
+4000MB  - 88,00 MT
+5000MB - 109,00 MT
+6000MB  - 133,00 MT
+7000MB  - 149,00 MT
+10000MB  - 219,00 MT
 
-📅 PACOTES DIAMANTE MENSAIS 💎
-Chamadas + SMS ilimitadas + 11GB = 440MT 
-Chamadas + SMS ilimitadas + 24GB = 820MT 
-Chamadas + SMS ilimitadas + 50GB = 1550MT 
-Chamadas + SMS ilimitadas + 100GB = 2250MT
+PACOTE SEMANAL BÁSICO (5 Dias🗓)
+Megabyte Renováveis!
+1700MB - 45,00MT
+2900MB - 80,00MT
+3400MB - 110,00MT
+5500MB - 150,00MT
+7800MB - 200,00MT
+11400MB - 300,00MT 
+
+ PACOTE SEMANAL PREMIUM ( 15 DIAS 🗓 ) 
+Megabyte Renováveis!
+3000MB - 100,00 MT
+5000MB - 149,00 MT
+8000MB - 201,00 MT
+10000MB - 231,00 MT
+20000MB - 352,00 MT
+
+PACOTE MENSAL EXCLUSIVO (30 dias🗓) 
+Não Renováveis 
+Não pode ter xtuna crédito
+
+
+2.8GB   - 100,00MT
+5.8GB   - 175,00MT
+8.8GB    - 200,00MT
+10.8GB  - 249,00MT
+12.8GB   - 300,00MT
+15.8GB    - 349,00MT
+18.8GB    - 400,00MT
+20.8GB    - 449,00MT
+25.8GB    - 549,00MT
+32.8GB   - 649,00MT
+51.2GB   - 1049,00MT
+60.2GB   - 124900MT
+80.2GB   - 1449,00MT
+100.2GB   - 1700,00MT
+
+🔴🔴 VODACOM
+➖Chamadas +SMS ILIMITADAS ➖p/todas as redes +GB➖
+
+➖ SEMANAL (7dias)➖
+280mt = Ilimitado+ 7.5GB
+
+Mensal(30dias):
+450MT - Ilimitado + 11.5GB.
+500MT - Ilimitado + 14.5GB.
+700MT - Ilimitado + 26.5GB.
+1000MT - Ilimitado + 37.5GB.
+1500MT - Ilimitado + 53.5GB
+2150MT - Ilimitado + 102.5GB
+
+PARA OS PACOTES MENSAIS, NÃO PODE TER TXUNA CRÉDITO.
+
+🟠🟠 MOVITEL
+➖Chamadas +SMS ILIMITADAS ➖p/todas as redes +GB➖
+
+➖ SEMANAL (7dias)➖
+280mt = Ilimitado+ 7.1GB
+
+➖ MENSAL (30dias)➖ p./tds redes
+450mt = Ilimitado+ 9GB
+950mt = Ilimitado+ 23GB
+1450mt = Ilimitado+ 38GB
+1700mt = Ilimitado+ 46GB
+1900mt = Ilimitado+ 53GB
+2400mt = ilimitado+ 68GB
+
+Importante 🚨: Envie o valor que consta na tabela!
 `,
-        pagamento: `- 📲 𝗘-𝗠𝗢𝗟𝗔: 864882152💶💰
-- Catia Anabela Nharrava 
-- 📲 𝗠-𝗣𝗘𝗦𝗔: 856268811💷💰 
-- ↪📞Kelven Junior Anabela Nharrava
-`
-    },
-    
+
+        pagamento: `╭━━━┛ 💸  ＦＯＲＭＡＳ ＤＥ ＰＡＧＡＭＥＮＴＯ: 
+┃
+┃ 🪙 E-Mola: (Glória) 👩‍💻
+┃     860186270  
+┃
+┃ 🪙 M-Pesa:  (Leonor)👨‍💻
+┃     857451196  
+┃
+┃
+┃ ⚠ IMPORTANTE:  
+┃     ▪ Envie o comprovativo em forma de mensagem e o número para receber rápido!
+┃
+┃┃
+╰⚠ NB: Válido apenas para Vodacom━━━━━━  
+       🚀 O futuro é agora. Vamos?`
+    }
+    
 };
+
 
 
 // === FUNÇÃO GOOGLE SHEETS ===
@@ -3143,35 +3240,41 @@ async function processMessage(message) {
 
             // === COMANDOS DO SISTEMA DE PACOTES ===
             if (sistemaPacotes) {
-                
+
                 // .pacote DIAS REF NUMERO - Criar pacote
                 if (comando.startsWith('.pacote ')) {
-                    console.log(`🔧 DEBUG: Comando .pacote detectado!`);
-                    console.log(`🔧 DEBUG: sistemaPacotes = ${sistemaPacotes ? 'INICIALIZADO' : 'NULL'}`);
-                    console.log(`🔧 DEBUG: SISTEMA_PACOTES_ENABLED = ${process.env.SISTEMA_PACOTES_ENABLED}`);
-                    
-                    if (!sistemaPacotes) {
-                        await message.reply(`❌ *SISTEMA DE PACOTES DESABILITADO*\n\nO sistema de pacotes automáticos não está ativo neste servidor.\n\nVerifique as configurações de ambiente.`);
-                        return;
-                    }
-                    const partes = message.body.trim().split(' ');
-                    
-                    if (partes.length < 4) {
-                        await message.reply(`❌ *USO INCORRETO*\n\n✅ **Formato correto:**\n*.pacote DIAS REF NUMERO*\n\n📝 **Exemplos:**\n• *.pacote 3 ABC123 845123456*\n• *.pacote 30 XYZ789 847654321*\n\n📦 **Tipos disponíveis:**\n• 3 - Pacote de 3 dias (300MB)\n• 5 - Pacote de 5 dias (500MB)\n• 15 - Pacote de 15 dias (1.5GB)\n• 30 - Pacote de 30 dias (3GB)`);
-                        return;
-                    }
-                    
-                    const [, diasPacote, referencia, numero] = partes;
-                    const grupoId = message.from;
-                    
-                    console.log(`📦 COMANDO PACOTE: Dias=${diasPacote}, Ref=${referencia}, Numero=${numero}`);
-                    
-                    const resultado = await sistemaPacotes.processarComprovante(referencia, numero, grupoId, diasPacote);
-                    
-                    if (resultado.sucesso) {
-                        await message.reply(resultado.mensagem);
-                    } else {
-                        await message.reply(`❌ **ERRO AO CRIAR PACOTE**\n\n⚠️ ${resultado.erro}\n\n💡 **Verificar:**\n• Dias válidos (3, 5, 15, 30)\n• Referência não está duplicada`);
+                    try {
+                        console.log(`🔧 DEBUG: Comando .pacote detectado!`);
+                        console.log(`🔧 DEBUG: sistemaPacotes = ${sistemaPacotes ? 'INICIALIZADO' : 'NULL'}`);
+                        console.log(`🔧 DEBUG: SISTEMA_PACOTES_ENABLED = ${process.env.SISTEMA_PACOTES_ENABLED}`);
+
+                        if (!sistemaPacotes) {
+                            await message.reply(`❌ *SISTEMA DE PACOTES DESABILITADO*\n\nO sistema de pacotes automáticos não está ativo neste servidor.\n\nVerifique as configurações de ambiente.`);
+                            return;
+                        }
+
+                        const partes = message.body.trim().split(' ');
+
+                        if (partes.length < 4) {
+                            await message.reply(`❌ *USO INCORRETO*\n\n✅ **Formato correto:**\n*.pacote DIAS REF NUMERO*\n\n📝 **Exemplos:**\n• *.pacote 3 ABC123 845123456*\n• *.pacote 30 XYZ789 847654321*\n\n📦 **Tipos disponíveis:**\n• 3 - Pacote de 3 dias (300MB)\n• 5 - Pacote de 5 dias (500MB)\n• 15 - Pacote de 15 dias (1.5GB)\n• 30 - Pacote de 30 dias (3GB)`);
+                            return;
+                        }
+
+                        const [, diasPacote, referencia, numero] = partes;
+                        const grupoId = message.from;
+
+                        console.log(`📦 COMANDO PACOTE: Dias=${diasPacote}, Ref=${referencia}, Numero=${numero}`);
+
+                        const resultado = await sistemaPacotes.processarComprovante(referencia, numero, grupoId, diasPacote);
+
+                        if (resultado.sucesso) {
+                            await message.reply(resultado.mensagem);
+                        } else {
+                            await message.reply(`❌ **ERRO AO CRIAR PACOTE**\n\n⚠️ ${resultado.erro}\n\n💡 **Verificar:**\n• Dias válidos (3, 5, 15, 30)\n• Referência não está duplicada`);
+                        }
+                    } catch (error) {
+                        console.error('❌ Erro no comando .pacote:', error);
+                        await message.reply(`❌ **ERRO INTERNO**\n\n⚠️ Não foi possível processar o pacote\n\n📝 Erro: ${error.message}`);
                     }
                     return;
                 }
@@ -3553,74 +3656,108 @@ async function processMessage(message) {
                 // .bonus NUMERO QUANTIDADE - Dar bônus manual (ADMIN APENAS)
                 if (comando.startsWith('.bonus ')) {
                     try {
-                        console.log(`🔍 Debug .bonus: autorMensagem = ${autorMensagem}`);
+                        console.log(`\n🎁 === COMANDO .BONUS DETECTADO ===`);
+                        console.log(`🔍 Autor: ${autorMensagem}`);
+                        console.log(`📝 Comando completo: "${comando}"`);
+
                         // Verificar permissão de admin
                         const admins = ['258861645968', '258123456789', '258852118624', '23450974470333']; // Lista de admins
                         const numeroAdmin = autorMensagem.replace('@c.us', '').replace('@lid', '');
+                        console.log(`🔑 Número admin processado: ${numeroAdmin}`);
+                        console.log(`📋 Admins permitidos: ${admins.join(', ')}`);
+
                         if (!admins.includes(numeroAdmin)) {
-                            console.log(`❌ Admin não autorizado: ${autorMensagem} (${numeroAdmin})`);
+                            console.log(`❌ Admin NÃO autorizado`);
                             return; // Falha silenciosa para segurança
                         }
 
+                        console.log(`✅ Admin AUTORIZADO`);
+
                         const parametros = comando.split(' ');
+                        console.log(`📊 Parâmetros: ${JSON.stringify(parametros)}`);
+
                         if (parametros.length < 3) {
+                            console.log(`❌ Parâmetros insuficientes (${parametros.length})`);
                             await message.reply(`❌ *FORMATO INCORRETO*\n\n✅ Use: *.bonus @usuario QUANTIDADE* ou *.bonus NUMERO QUANTIDADE*\nExemplos:\n• *.bonus @258123456789 500MB*\n• *.bonus 258123456789 500MB*`);
                             return;
                         }
 
                         let numeroDestino = parametros[1];
                         const quantidadeStr = parametros[2].toUpperCase();
+                        console.log(`📱 Número destino: ${numeroDestino}`);
+                        console.log(`💎 Quantidade: ${quantidadeStr}`);
 
                         // Verificar se é menção ou número direto
                         if (numeroDestino.startsWith('@')) {
+                            console.log(`🔍 Detectada menção (@)`);
                             // Remover @ e verificar se tem menções na mensagem
                             const numeroMencao = numeroDestino.substring(1);
                             if (message.mentionedIds && message.mentionedIds.length > 0) {
+                                console.log(`✅ Menções encontradas: ${message.mentionedIds.join(', ')}`);
                                 // Usar a primeira menção encontrada
                                 const mencaoId = message.mentionedIds[0];
                                 numeroDestino = mencaoId.replace('@c.us', '');
+                                console.log(`📱 Número extraído da menção: ${numeroDestino}`);
                             } else {
+                                console.log(`⚠️ Nenhuma menção encontrada, usando número após @`);
                                 // Tentar usar o número após @
                                 numeroDestino = numeroMencao;
                             }
                         }
 
+                        console.log(`🔎 Validando número: "${numeroDestino}"`);
+                        console.log(`   - Tem 9 dígitos? ${/^\d{9}$/.test(numeroDestino)}`);
+                        console.log(`   - Tem 12 dígitos? ${/^\d{12}$/.test(numeroDestino)}`);
+
                         // Validar número - aceitar 9 dígitos (848715208) ou 12 dígitos (258848715208)
                         if (!/^\d{9}$/.test(numeroDestino) && !/^\d{12}$/.test(numeroDestino)) {
+                            console.log(`❌ Número INVÁLIDO: ${numeroDestino}`);
                             await message.reply(`❌ *NÚMERO INVÁLIDO*\n\n✅ Use formato:\n• *.bonus @848715208 500MB* (9 dígitos)\n• *.bonus @258848715208 500MB* (12 dígitos)\n• *.bonus 848715208 500MB* (número direto)`);
                             return;
                         }
-                        
+
+                        console.log(`✅ Número válido`);
+
                         // Converter para formato completo se necessário (adicionar 258 no início)
                         if (numeroDestino.length === 9) {
                             numeroDestino = '258' + numeroDestino;
+                            console.log(`🔄 Convertido para 12 dígitos: ${numeroDestino}`);
                         }
 
                         // Converter quantidade para MB
                         let quantidadeMB;
                         if (quantidadeStr.endsWith('GB')) {
                             const gb = parseFloat(quantidadeStr.replace('GB', ''));
+                            console.log(`💎 Convertendo GB: ${gb}GB = ${gb * 1024}MB`);
                             if (isNaN(gb) || gb <= 0) {
+                                console.log(`❌ GB inválido: ${quantidadeStr}`);
                                 await message.reply(`❌ Quantidade inválida: *${quantidadeStr}*`);
                                 return;
                             }
                             quantidadeMB = Math.round(gb * 1024);
                         } else if (quantidadeStr.endsWith('MB')) {
                             quantidadeMB = parseInt(quantidadeStr.replace('MB', ''));
+                            console.log(`💎 Usando MB diretamente: ${quantidadeMB}MB`);
                             if (isNaN(quantidadeMB) || quantidadeMB <= 0) {
+                                console.log(`❌ MB inválido: ${quantidadeStr}`);
                                 await message.reply(`❌ Quantidade inválida: *${quantidadeStr}*`);
                                 return;
                             }
                         } else {
+                            console.log(`❌ Formato desconhecido: ${quantidadeStr}`);
                             await message.reply(`❌ *FORMATO INVÁLIDO*\n\n✅ Use: MB ou GB\nExemplos: 500MB, 1.5GB, 2GB`);
                             return;
                         }
 
+                        console.log(`✅ Quantidade final: ${quantidadeMB}MB`);
+
                         // COPIAR EXATAMENTE A LÓGICA DAS BOAS-VINDAS - SEM CONVERSÃO
                         const participantId = numeroDestino; // Usar número exatamente como recebido
+                        console.log(`🎯 Participant ID: ${participantId}`);
                         
                         // Inicializar saldo se não existir
                         if (!bonusSaldos[participantId]) {
+                            console.log(`🆕 Criando novo registro de bônus para ${participantId}`);
                             bonusSaldos[participantId] = {
                                 saldo: 0,
                                 detalhesReferencias: {},
@@ -3628,47 +3765,60 @@ async function processMessage(message) {
                                 totalReferencias: 0,
                                 bonusAdmin: []
                             };
+                        } else {
+                            console.log(`✅ Registro existente encontrado (saldo atual: ${bonusSaldos[participantId].saldo}MB)`);
                         }
 
                         // Adicionar bônus
+                        const saldoAnterior = bonusSaldos[participantId].saldo;
                         bonusSaldos[participantId].saldo += quantidadeMB;
-                        
+                        console.log(`💰 Saldo: ${saldoAnterior}MB → ${bonusSaldos[participantId].saldo}MB (+${quantidadeMB}MB)`);
+
                         // Registrar histórico de bônus admin
                         if (!bonusSaldos[participantId].bonusAdmin) {
                             bonusSaldos[participantId].bonusAdmin = [];
                         }
-                        
+
                         bonusSaldos[participantId].bonusAdmin.push({
                             quantidade: quantidadeMB,
                             data: new Date().toISOString(),
                             admin: autorMensagem,
                             motivo: 'Bônus administrativo'
                         });
+                        console.log(`📝 Histórico de bônus admin atualizado (${bonusSaldos[participantId].bonusAdmin.length} registros)`);
 
-                        // Sistema de cache otimizado - sem salvamento em arquivos
+                        // Salvar dados após conceder bônus
+                        agendarSalvamento();
 
                         const quantidadeFormatada = quantidadeMB >= 1024 ? `${(quantidadeMB/1024).toFixed(2)}GB` : `${quantidadeMB}MB`;
                         const novoSaldo = bonusSaldos[participantId].saldo;
                         const novoSaldoFormatado = novoSaldo >= 1024 ? `${(novoSaldo/1024).toFixed(2)}GB` : `${novoSaldo}MB`;
 
-                        console.log(`🎁 ADMIN BONUS: ${autorMensagem} deu ${quantidadeFormatada} para ${numeroDestino}`);
+                        console.log(`🎁 ADMIN BONUS CONCEDIDO: ${autorMensagem} → ${numeroDestino} (+${quantidadeFormatada})`);
 
-                        // Notificar o usuário que recebeu o bônus (usando mesmo formato da confirmação de compra)
+                        // Notificar o usuário que recebeu o bônus (USANDO EXATAMENTE O PADRÃO DAS CONFIRMAÇÕES DE COMPRA)
+                        const mensagemBonus = `🎁 *BÔNUS ADMINISTRATIVO!*\n\n` +
+                            `💎 @NOME_PLACEHOLDER, recebeste *${quantidadeFormatada}* de bônus!\n\n` +
+                            `👨‍💼 *Ofertado por:* Administrador\n` +
+                            `💰 *Novo saldo:* ${novoSaldoFormatado}\n\n` +
+                            `${novoSaldo >= 1024 ? '🚀 *Já podes sacar!* Use: *.sacar*' : '💡 *Continua a acumular para sacar!*'}`;
+
                         try {
-                            const mensagemBonus = `🎁 *BÔNUS ADMINISTRATIVO!*\n\n` +
-                                `💎 @NOME_PLACEHOLDER, recebeste *${quantidadeFormatada}* de bônus!\n\n` +
-                                `👨‍💼 *Ofertado por:* Administrador\n` +
-                                `💰 *Novo saldo:* ${novoSaldoFormatado}\n\n` +
-                                `${novoSaldo >= 1024 ? '🚀 *Já podes sacar!* Use: *.sacar*' : '💡 *Continua a acumular para sacar!*'}`;
+                            // Garantir que participantId tem @c.us para menção funcionar
+                            const contactIdMencao = participantId.includes('@c.us') ? participantId : `${participantId}@c.us`;
 
-                            // Substituir placeholder e enviar com menção (igual confirmação de compra)
+                            // COPIAR EXATAMENTE O PADRÃO DAS CONFIRMAÇÕES (linha 5081)
                             const mensagemFinal = mensagemBonus.replace('@NOME_PLACEHOLDER', `@${participantId.replace('@c.us', '').replace('@lid', '')}`);
 
+                            // Enviar com menção igual às confirmações de compra (linha 5084-5086)
                             await client.sendMessage(message.from, mensagemFinal, {
-                                mentions: [participantId]
+                                mentions: [contactIdMencao]
                             });
                         } catch (notificationError) {
                             console.error('❌ Erro ao enviar notificação de bônus admin:', notificationError);
+                            // Fallback: enviar sem menção (igual às confirmações linha 5091-5092)
+                            const mensagemFallback = mensagemBonus.replace('@NOME_PLACEHOLDER', `@${participantId.replace('@c.us', '').replace('@lid', '')}`);
+                            await message.reply(mensagemFallback);
                         }
 
                         await message.reply(
@@ -4571,9 +4721,10 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                     quantidade: quantidadeMB,
                     data: agora.toISOString()
                 });
-                
-                // Sistema de cache otimizado - sem salvamento em arquivos
-                
+
+                // Salvar dados após criar saque
+                agendarSalvamento();
+
                 // Enviar para Tasker
                 try {
                     await enviarParaTasker(referenciaSaque, quantidadeMB, numeroDestino, message.from, `SAQUE_BONUS_${message._data.notifyName || 'Cliente'}`);
