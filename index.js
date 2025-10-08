@@ -1559,9 +1559,13 @@ const ARQUIVO_COMANDOS = 'comandos_customizados.json';
 const ADMINISTRADORES_GLOBAIS = [
     '258874100607@c.us',
     '258871112049@c.us',
-    '258845356399@c.us', 
-    '258840326152@c.us', 
+    '258845356399@c.us',
+    '258840326152@c.us',
     '258852118624@c.us',
+    '251032533737504@c.us',
+    '251032533737504@lid',
+    '203109674577958@c.us',
+    '203109674577958@lid',
     '23450974470333@lid'   // ID interno do WhatsApp para 852118624
     // Removido temporariamente para testar verificação de grupo: '245075749638206@lid'
 ];
