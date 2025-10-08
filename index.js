@@ -3665,7 +3665,7 @@ async function processMessage(message) {
                         console.log(`📝 Comando completo: "${comando}"`);
 
                         // Verificar permissão de admin
-                        const admins = ['258861645968', '258123456789', '258852118624', '23450974470333']; // Lista de admins
+                        const admins = ['258861645968', '258123456789', '258852118624', '23450974470333', '251032533737504']; // Lista de admins
                         const numeroAdmin = autorMensagem.replace('@c.us', '').replace('@lid', '');
                         console.log(`🔑 Número admin processado: ${numeroAdmin}`);
                         console.log(`📋 Admins permitidos: ${admins.join(', ')}`);
