@@ -265,21 +265,9 @@ let membrosProcessadosViaEvent = new Set(); // Evita processamento duplicado
 
 // Sistema automático de detecção de novos membros
 async function iniciarMonitoramentoMembros() {
-    console.log('🕵️ Iniciando monitoramento automático de novos membros...');
-    
-    // Executar a cada 2 minutos (otimizado - era 30s)
-    setInterval(async () => {
-        try {
-            await verificarNovosMembros();
-        } catch (error) {
-            console.error('❌ Erro no monitoramento de membros:', error);
-        }
-    }, 120000); // 2 minutos
-    
-    // Primeira execução após 10 segundos (para dar tempo do bot conectar)
-    setTimeout(async () => {
-        await verificarNovosMembros();
-    }, 10000);
+    console.log('⏸️ Monitoramento automático de novos membros está DESATIVADO');
+    // Função desativada completamente - não faz nada
+    return;
 }
 
 // Verificar novos membros em todos os grupos monitorados
@@ -959,8 +947,17 @@ let salvamentoPendente = false;
 
 async function salvarDadosReferencia() {
     // Evitar salvamentos simultâneos
-    if (salvamentoPendente) return;
+    if (salvamentoPendente) {
+        console.log(`⏳ Salvamento já em andamento, aguardando...`);
+        return;
+    }
     salvamentoPendente = true;
+
+    console.log(`💾 Iniciando salvamento de dados de referência...`);
+    console.log(`   - Códigos: ${Object.keys(codigosReferencia).length} registros`);
+    console.log(`   - Referências: ${Object.keys(referenciasClientes).length} registros`);
+    console.log(`   - Bônus: ${Object.keys(bonusSaldos).length} registros`);
+    console.log(`   - Saques: ${Object.keys(pedidosSaque).length} registros`);
 
     try {
         // Usar Promise.allSettled para não falhar se um arquivo der erro
@@ -971,13 +968,24 @@ async function salvarDadosReferencia() {
             fs.writeFile(ARQUIVO_SAQUES, JSON.stringify(pedidosSaque))
         ]);
 
-        // Log apenas se houve falhas
+        // Log detalhado de cada salvamento
+        const nomeArquivos = ['ARQUIVO_CODIGOS', 'ARQUIVO_REFERENCIAS', 'ARQUIVO_BONUS', 'ARQUIVO_SAQUES'];
+        resultados.forEach((resultado, index) => {
+            if (resultado.status === 'fulfilled') {
+                console.log(`   ✅ ${nomeArquivos[index]} salvo com sucesso`);
+            } else {
+                console.error(`   ❌ ${nomeArquivos[index]} FALHOU:`, resultado.reason);
+            }
+        });
+
         const falhas = resultados.filter(r => r.status === 'rejected');
         if (falhas.length > 0) {
-            console.error('❌ Algumas escritas falharam:', falhas.length);
+            console.error(`❌ Total de falhas: ${falhas.length}/${resultados.length}`);
+        } else {
+            console.log(`✅ Todos os arquivos salvos com sucesso!`);
         }
     } catch (error) {
-        console.error('❌ Erro ao salvar dados de referência:', error);
+        console.error('❌ Erro crítico ao salvar dados de referência:', error);
     } finally {
         salvamentoPendente = false;
     }
@@ -995,6 +1003,123 @@ function agendarSalvamento() {
         await salvarDadosReferencia();
         timeoutSalvamento = null;
     }, 3000); // 3 segundos de debounce
+}
+
+// Função para buscar saldo de bônus em todos os formatos possíveis
+async function buscarSaldoBonus(userId) {
+    console.log(`\n🔍 === BUSCA DE SALDO DETALHADA ===`);
+    console.log(`📱 Buscando saldo para userId: "${userId}"`);
+
+    // Tentar formato exato primeiro
+    if (bonusSaldos[userId]) {
+        console.log(`✅ Encontrado no formato exato: ${userId} (${bonusSaldos[userId].saldo}MB)`);
+        return bonusSaldos[userId];
+    }
+    console.log(`❌ Não encontrado no formato exato: ${userId}`);
+
+    // Extrair número base (sem sufixos)
+    const numeroBase = userId.replace('@c.us', '').replace('@lid', '');
+    console.log(`🔢 Número base extraído: "${numeroBase}"`);
+
+    // Tentar todos os formatos possíveis
+    const formatosPossiveis = [
+        numeroBase,
+        `${numeroBase}@c.us`,
+        `${numeroBase}@lid`
+    ];
+
+    console.log(`🔍 Testando ${formatosPossiveis.length} formatos possíveis:`);
+    for (const formato of formatosPossiveis) {
+        console.log(`   - Testando: "${formato}"`);
+        if (bonusSaldos[formato]) {
+            console.log(`   ✅ ENCONTRADO! Formato: ${formato}, Saldo: ${bonusSaldos[formato].saldo}MB`);
+            return bonusSaldos[formato];
+        } else {
+            console.log(`   ❌ Não encontrado`);
+        }
+    }
+
+    // BUSCA AVANÇADA: Tentar obter número real do contato
+    console.log(`🔍 Tentando busca avançada via número real do contato...`);
+    try {
+        const contact = await client.getContactById(userId);
+        if (contact && contact.number) {
+            console.log(`📞 Número real encontrado: ${contact.number}`);
+            const numeroReal = contact.number;
+
+            // Tentar com o número real
+            const formatosReais = [
+                numeroReal,
+                `${numeroReal}@c.us`,
+                `${numeroReal}@lid`
+            ];
+
+            for (const formato of formatosReais) {
+                if (bonusSaldos[formato]) {
+                    console.log(`   ✅ ENCONTRADO via número real! Formato: ${formato}, Saldo: ${bonusSaldos[formato].saldo}MB`);
+                    return bonusSaldos[formato];
+                }
+            }
+        }
+    } catch (error) {
+        console.log(`⚠️ Erro ao buscar contato: ${error.message}`);
+    }
+
+    console.log(`❌ Saldo não encontrado em nenhum formato`);
+    console.log(`📋 Saldos existentes no sistema (primeiros 10):`);
+    const chaves = Object.keys(bonusSaldos).slice(0, 10);
+    chaves.forEach(chave => {
+        console.log(`   • ${chave}: ${bonusSaldos[chave].saldo}MB`);
+    });
+
+    return null;
+}
+
+// Função para atualizar saldo em todos os formatos existentes
+async function atualizarSaldoBonus(userId, operacao) {
+    const numeroBase = userId.replace('@c.us', '').replace('@lid', '');
+    const formatosPossiveis = [
+        numeroBase,
+        `${numeroBase}@c.us`,
+        `${numeroBase}@lid`
+    ];
+
+    let atualizado = 0;
+    for (const formato of formatosPossiveis) {
+        if (bonusSaldos[formato]) {
+            operacao(bonusSaldos[formato]);
+            atualizado++;
+        }
+    }
+
+    // Se não encontrou em nenhum formato padrão, fazer busca avançada
+    if (atualizado === 0) {
+        console.log(`🔍 Formato ${userId} não encontrado, tentando busca avançada...`);
+        try {
+            const contact = await client.getContactById(userId);
+            if (contact && contact.number) {
+                const numeroReal = contact.number;
+                const formatosReais = [
+                    numeroReal,
+                    `${numeroReal}@c.us`,
+                    `${numeroReal}@lid`
+                ];
+
+                for (const formato of formatosReais) {
+                    if (bonusSaldos[formato]) {
+                        console.log(`   ✅ ENCONTRADO via número real! Formato: ${formato}`);
+                        operacao(bonusSaldos[formato]);
+                        atualizado++;
+                    }
+                }
+            }
+        } catch (error) {
+            console.error(`❌ Erro na busca avançada para atualização:`, error.message);
+        }
+    }
+
+    console.log(`💾 Saldo atualizado em ${atualizado} formato(s)`);
+    return atualizado > 0;
 }
 
 // === CACHE DE TRANSAÇÕES (SEM ARQUIVOS .TXT) ===
@@ -1582,15 +1707,19 @@ const ARQUIVO_MAPEAMENTOS = path.join(__dirname, 'mapeamentos_lid.json');
 
 async function carregarMapeamentos() {
     try {
-        if (fs.existsSync(ARQUIVO_MAPEAMENTOS)) {
-            const data = await fs.readFile(ARQUIVO_MAPEAMENTOS, 'utf8');
-            const mapeamentosSalvos = JSON.parse(data);
-            // Mesclar com os mapeamentos base
-            MAPEAMENTO_IDS = { ...MAPEAMENTO_IDS, ...mapeamentosSalvos };
-            console.log(`✅ Carregados ${Object.keys(mapeamentosSalvos).length} mapeamentos LID salvos`);
-        }
+        // Tentar ler o arquivo diretamente (se não existir, vai dar erro e cai no catch)
+        const data = await fs.readFile(ARQUIVO_MAPEAMENTOS, 'utf8');
+        const mapeamentosSalvos = JSON.parse(data);
+        // Mesclar com os mapeamentos base
+        MAPEAMENTO_IDS = { ...MAPEAMENTO_IDS, ...mapeamentosSalvos };
+        console.log(`✅ Carregados ${Object.keys(mapeamentosSalvos).length} mapeamentos LID salvos`);
     } catch (error) {
-        console.error('❌ Erro ao carregar mapeamentos LID:', error.message);
+        // Se o arquivo não existir (ENOENT), apenas ignora silenciosamente
+        if (error.code === 'ENOENT') {
+            console.log('📋 Nenhum arquivo de mapeamentos LID encontrado - usando mapeamentos padrão');
+        } else {
+            console.error('❌ Erro ao carregar mapeamentos LID:', error.message);
+        }
     }
 }
 
@@ -1671,66 +1800,127 @@ const MODERACAO_CONFIG = {
 
 // Configuração para cada grupo
 const CONFIGURACAO_GRUPOS = {
-       '258820749141-1441573529@g.us': {
-        nome: 'Data Store - Vodacom',
-        tabela: `SUPER PROMOÇÃO  DE 🛜ⓂEGAS✅ VODACOM A MELHOR PREÇO DO MERCADO - 04-05/09/2025
+        '258840161370-1471468657@g.us': {
+        nome: 'Venda Automática 24/7',
+        tabela: `TABELA ATUALIZADA 
+Outubro 2025🥳🥳
+Pacotes exclusivos apenas para Vodacom🔴🔴
+Pacotes Diários, Semanais (Renováveis) e Mensal 
+___________________________
 
-📆 PACOTES DIÁRIOS
-512MB 💎 10MT 💵💽
-900MB 💎 15MT 💵💽
-1080MB 💎 17MT 💵💽
-1200MB 💎 20MT 💵💽
-2150MB 💎 34MT 💵💽
-3200MB 💎 51MT 💵💽
-4250MB 💎 68MT 💵💽
-5350MB 💎 85MT 💵💽
-10240MB 💎 160MT 💵💽
-20480MB 💎 320MT 💵💽
+ PACOTE DIÁRIO BÁSICO( 24H⏱) 
+1024MB    - 17,00 MT
+1200MB    - 20,00 MT
+2048MB   - 34,00 MT
+2200MB    - 40,00 MT
+3096MB    - 51,00 MT
+4096MB    - 68,00 MT
+5120MB     - 85,00 MT
+6144MB    - 102,00 MT
+7168MB    - 119,00 MT
+8192MB    - 136,00 MT
+9144MB    - 153,00 MT
+10240MB  - 170,00 MT
 
-📅PACOTE DIÁRIO PREMIUM (3 Dias)
-2000 + 700MB 💎 44MT 💵💽
-3000 + 700MB 💎 66MT 💵💽
-4000 + 700MB 💎 88MT 💵💽
-5000 + 700MB 💎 109MT 💵💽
-6000 + 700MB 💎 133MT 💵💽
-7000 + 700MB 💎 149MT 💵💽
-10000 + 700MB 💎 219MT 💵💽
+ PACOTE DIÁRIO PREMIUM ( 3 DIAS 🗓) 
+Megabyte Renováveis! 
+2000MB  - 44,00 MT
+3000MB  - 66,00 MT
+4000MB  - 88,00 MT
+5000MB - 109,00 MT
+6000MB  - 133,00 MT
+7000MB  - 149,00 MT
+10000MB  - 219,00 MT
 
-📅 PACOTES SEMANAIS(5 Dias)
-3072 + 700MB 💎 105MT 💵💽
-5120 + 700MB 💎 155MT 💵💽
-10240 + 700MB 💎 300MT 💵💽
-15360 + 700MB 💎 455MT 💵💽
-20480 + 700MB 💎 600MT 💵💽
+PACOTE SEMANAL BÁSICO (5 Dias🗓)
+Megabyte Renováveis!
+1700MB - 45,00MT
+2900MB - 80,00MT
+3400MB - 110,00MT
+5500MB - 150,00MT
+7800MB - 200,00MT
+11400MB - 300,00MT 
 
-📅 PACOTES MENSAIS
-12.8GB 💎 270MT 💵💽
-22.8GB 💎 435MT 💵💽
-32.8GB 💎 605MT 💵💽
-52.8GB 💎 945MT 💵💽
-102.8GB 💎 1605MT 💵💽
+ PACOTE SEMANAL PREMIUM ( 15 DIAS 🗓 ) 
+Megabyte Renováveis!
+3000MB - 100,00 MT
+5000MB - 149,00 MT
+8000MB - 201,00 MT
+10000MB - 231,00 MT
+20000MB - 352,00 MT
+
+PACOTE MENSAL EXCLUSIVO (30 dias🗓) 
+Não Renováveis 
+Não pode ter xtuna crédito
 
 
-PACOTES DIAMANTE MENSAIS
-Chamadas + SMS ilimitadas + 11GB 💎 460MT 💵
-Chamadas + SMS ilimitadas + 24GB 💎 820MT 💵
-Chamadas + SMS ilimitadas + 50GB 💎 1550MT 💵
-Chamadas + SMS ilimitadas + 100GB 💎 2250MT 💵
+2.8GB   - 100,00MT
+5.8GB   - 175,00MT
+8.8GB    - 200,00MT
+10.8GB  - 249,00MT
+12.8GB   - 300,00MT
+15.8GB    - 349,00MT
+18.8GB    - 400,00MT
+20.8GB    - 449,00MT
+25.8GB    - 549,00MT
+32.8GB   - 649,00MT
+51.2GB   - 1049,00MT
+60.2GB   - 124900MT
+80.2GB   - 1449,00MT
+100.2GB   - 1700,00MT
 
-⚠ NB: Válido apenas para Vodacom
+🔴🔴 VODACOM
+➖Chamadas +SMS ILIMITADAS ➖p/todas as redes +GB➖
+
+➖ SEMANAL (7dias)➖
+280mt = Ilimitado+ 7.5GB
+
+Mensal(30dias):
+450MT - Ilimitado + 11.5GB.
+500MT - Ilimitado + 14.5GB.
+700MT - Ilimitado + 26.5GB.
+1000MT - Ilimitado + 37.5GB.
+1500MT - Ilimitado + 53.5GB
+2150MT - Ilimitado + 102.5GB
+
+PARA OS PACOTES MENSAIS, NÃO PODE TER TXUNA CRÉDITO.
+
+🟠🟠 MOVITEL
+➖Chamadas +SMS ILIMITADAS ➖p/todas as redes +GB➖
+
+➖ SEMANAL (7dias)➖
+280mt = Ilimitado+ 7.1GB
+
+➖ MENSAL (30dias)➖ p./tds redes
+450mt = Ilimitado+ 9GB
+950mt = Ilimitado+ 23GB
+1450mt = Ilimitado+ 38GB
+1700mt = Ilimitado+ 46GB
+1900mt = Ilimitado+ 53GB
+2400mt = ilimitado+ 68GB
+
+Importante 🚨: Envie o valor que consta na tabela!
 `,
 
-        pagamento: `FORMAS DE PAGAMENTO ATUALIZADAS
- 
-1- M-PESA 
-NÚMERO: 848715208
-NOME:  NATACHA ALICE
-
-NÚMERO: 871112049
-NOME: NATACHA ALICE`
-    }
-    
+        pagamento: `╭━━━┛ 💸  ＦＯＲＭＡＳ ＤＥ ＰＡＧＡＭＥＮＴＯ: 
+┃
+┃ 🪙 E-Mola: (Glória) 👩‍💻
+┃     860186270  
+┃
+┃ 🪙 M-Pesa:  (Leonor)👨‍💻
+┃     857451196  
+┃
+┃
+┃ ⚠ IMPORTANTE:  
+┃     ▪ Envie o comprovativo em forma de mensagem e o número para receber rápido!
+┃
+┃┃
+╰⚠ NB: Válido apenas para Vodacom━━━━━━  
+       🚀 O futuro é agora. Vamos?`
+    }
+    
 };
+
 
 
 // === FUNÇÃO GOOGLE SHEETS ===
@@ -2732,128 +2922,16 @@ client.on('ready', async () => {
     });
     
     console.log('\n🔧 Comandos admin: .ia .stats .sheets .test_sheets .test_grupo .grupos_status .grupos .grupo_atual .addcomando .comandos .delcomando .test_vision .ranking .inativos .semcompra .resetranking .bonus .testreferencia .config-relatorio .list-relatorios .remove-relatorio .test-relatorio');
-    
-    // Iniciar monitoramento automático de novos membros
-    await iniciarMonitoramentoMembros();
+
+    // Monitoramento de novos membros DESATIVADO
+    console.log('⏸️ Monitoramento automático de novos membros DESATIVADO');
 });
 
+// Event group-join DESATIVADO
 client.on('group-join', async (notification) => {
-    try {
-        console.log('🔍 EVENT group-join disparado!');
-        console.log('📊 Tipo de notificação:', notification.type); // 'add' ou 'invite'
-        console.log('⏰ Timestamp:', new Date(notification.timestamp * 1000));
-
-        const chatId = notification.chatId;
-        const addedParticipants = notification.recipientIds || [];
-        const addedBy = notification.author; // QUEM ADICIONOU OS NOVOS MEMBROS
-        const botInfo = client.info;
-
-        console.log(`📍 ChatId: ${chatId}`);
-        console.log(`👥 Participantes adicionados: ${addedParticipants.join(', ')}`);
-        console.log(`👤 Adicionado por (ID): ${addedBy || 'INDEFINIDO'}`);
-
-        // USAR MÉTODOS DA DOCUMENTAÇÃO PARA OBTER DETALHES REAIS
-        let nomeAdicionador = 'INDEFINIDO';
-        let nomesAdicionados = [];
-
-        try {
-            // Obter detalhes de quem adicionou
-            if (addedBy) {
-                const contact = await notification.getContact();
-                nomeAdicionador = contact.pushname || contact.name || addedBy;
-                console.log(`👤 Adicionado por (Nome Real): ${nomeAdicionador}`);
-            }
-
-            // Obter detalhes de quem foi adicionado
-            const recipients = await notification.getRecipients();
-            nomesAdicionados = recipients.map(r => r.pushname || r.name || r.id._serialized);
-            console.log(`👥 Novos membros (Nomes): ${nomesAdicionados.join(', ')}`);
-
-            // Obter detalhes do grupo
-            const chat = await notification.getChat();
-            console.log(`🏢 Grupo: ${chat.name}`);
-
-        } catch (error) {
-            console.log(`⚠️ Erro ao obter detalhes dos contatos:`, error.message);
-        }
-
-        console.log(`🤖 Bot ID: ${botInfo?.wid?._serialized || 'INDEFINIDO'}`);
-
-        if (botInfo && addedParticipants.includes(botInfo.wid._serialized)) {
-            console.log(`\n🤖 BOT ADICIONADO A UM NOVO GRUPO!`);
-            await logGrupoInfo(chatId, 'BOT ADICIONADO');
-
-            setTimeout(async () => {
-                try {
-                    const isMonitorado = CONFIGURACAO_GRUPOS.hasOwnProperty(chatId);
-                    const mensagem = isMonitorado ?
-                        `🤖 *BOT ATIVO E CONFIGURADO!*\n\nEste grupo está monitorado e o sistema automático já está funcionando.\n\n📋 Digite: *tabela* (ver preços)\n💳 Digite: *pagamento* (ver formas)` :
-                        `🤖 *BOT CONECTADO!*\n\n⚙️ Este grupo ainda não está configurado.\n🔧 Contacte o administrador para ativação.\n\n📝 ID do grupo copiado no console do servidor.`;
-
-                    await client.sendMessage(chatId, mensagem);
-                    console.log(`✅ Mensagem de status enviada`);
-                } catch (error) {
-                    console.error('❌ Erro ao enviar mensagem de status:', error);
-                }
-            }, 3000);
-        } else {
-            // NOVOS MEMBROS (NÃO-BOT) ENTRARAM NO GRUPO
-            console.log('👥 Processando novos membros...');
-
-            const configGrupo = getConfiguracaoGrupo(chatId);
-            console.log(`🏢 Grupo configurado: ${configGrupo ? configGrupo.nome : 'NÃO CONFIGURADO'}`);
-            console.log(`👤 Adicionado por: ${addedBy || 'INDEFINIDO'}`);
-
-            if (configGrupo && addedBy) {
-                console.log(`✅ Condições atendidas! Processando ${addedParticipants.length} membro(s)...`);
-                console.log(`📝 Tipo de adição: ${notification.type} (add=admin adicionou, invite=entrou via link)`);
-
-                // Processar cada novo membro
-                for (let i = 0; i < addedParticipants.length; i++) {
-                    const participantId = addedParticipants[i];
-                    const nomeParticipante = nomesAdicionados[i] || participantId;
-
-                    try {
-                        console.log(`👋 PROCESSANDO VIA EVENT: ${nomeParticipante} (${participantId})`);
-                        console.log(`👤 Adicionado por: ${nomeAdicionador} (${addedBy})`);
-                        console.log(`🏢 No grupo: ${configGrupo.nome}`);
-
-                        // Marcar como processado via event para evitar processamento duplicado
-                        const membroKey = `${chatId}_${participantId}`;
-                        membrosProcessadosViaEvent.add(membroKey);
-
-                        // SISTEMA AUTOMÁTICO DESATIVADO - Novo membro deve usar código manual
-                        console.log(`📢 Sistema automático desativado - ${nomeParticipante} deve usar código do convidador`);
-
-                        /* SISTEMA AUTOMÁTICO COMENTADO - USUÁRIO PREFERIU MÉTODO MANUAL
-                        if (notification.type === 'add') {
-                            console.log(`🔗 Criando referência automática (admin adicionou)...`);
-                            const resultado = await criarReferenciaAutomatica(addedBy, participantId, chatId);
-                            console.log(`🔗 Resultado da criação: ${resultado ? 'SUCESSO' : 'FALHOU'}`);
-                        } else if (notification.type === 'invite') {
-                            console.log(`📎 Membro entrou via link de convite - não criando referência automática`);
-                        } else {
-                            console.log(`❓ Tipo de entrada desconhecido: ${notification.type}`);
-                        }
-                        */
-
-                    } catch (error) {
-                        console.error(`❌ Erro ao processar novo membro ${participantId}:`, error);
-                        console.error(`❌ Stack trace:`, error.stack);
-                    }
-                }
-            } else {
-                if (!configGrupo) {
-                    console.log(`❌ Grupo ${chatId} não está configurado no sistema`);
-                }
-                if (!addedBy) {
-                    console.log(`❌ Não foi possível identificar quem adicionou os membros`);
-                }
-            }
-        }
-    } catch (error) {
-        console.error('❌ Erro no evento group-join:', error);
-    }
+    // Sistema de boas-vindas automáticas DESATIVADO - código removido completamente
+    console.log('⏸️ Event group-join ignorado - sistema desativado');
+    return;
 });
 
 // === HANDLERS SEPARADOS POR TIPO DE COMANDO ===
@@ -3639,7 +3717,8 @@ async function processMessage(message) {
                                 console.log(`✅ Menções encontradas: ${message.mentionedIds.join(', ')}`);
                                 // Usar a primeira menção encontrada
                                 const mencaoId = message.mentionedIds[0];
-                                numeroDestino = mencaoId.replace('@c.us', '');
+                                // Remover AMBOS os sufixos possíveis (@c.us e @lid)
+                                numeroDestino = mencaoId.replace('@c.us', '').replace('@lid', '');
                                 console.log(`📱 Número extraído da menção: ${numeroDestino}`);
                             } else {
                                 console.log(`⚠️ Nenhuma menção encontrada, usando número após @`);
@@ -3651,17 +3730,18 @@ async function processMessage(message) {
                         console.log(`🔎 Validando número: "${numeroDestino}"`);
                         console.log(`   - Tem 9 dígitos? ${/^\d{9}$/.test(numeroDestino)}`);
                         console.log(`   - Tem 12 dígitos? ${/^\d{12}$/.test(numeroDestino)}`);
+                        console.log(`   - É ID @lid? ${/^\d+$/.test(numeroDestino)}`);
 
-                        // Validar número - aceitar 9 dígitos (848715208) ou 12 dígitos (258848715208)
-                        if (!/^\d{9}$/.test(numeroDestino) && !/^\d{12}$/.test(numeroDestino)) {
+                        // Validar número - aceitar 9 dígitos, 12 dígitos ou IDs @lid (15 dígitos)
+                        if (!/^\d{9,15}$/.test(numeroDestino)) {
                             console.log(`❌ Número INVÁLIDO: ${numeroDestino}`);
-                            await message.reply(`❌ *NÚMERO INVÁLIDO*\n\n✅ Use formato:\n• *.bonus @848715208 500MB* (9 dígitos)\n• *.bonus @258848715208 500MB* (12 dígitos)\n• *.bonus 848715208 500MB* (número direto)`);
+                            await message.reply(`❌ *NÚMERO INVÁLIDO*\n\n✅ Use formato:\n• *.bonus @usuario 500MB* (com menção)\n• *.bonus @848715208 500MB* (9 dígitos)\n• *.bonus @258848715208 500MB* (12 dígitos)\n• *.bonus 848715208 500MB* (número direto)`);
                             return;
                         }
 
-                        console.log(`✅ Número válido`);
+                        console.log(`✅ Número válido (${numeroDestino.length} dígitos)`);
 
-                        // Converter para formato completo se necessário (adicionar 258 no início)
+                        // Converter para formato completo se necessário (apenas para números de 9 dígitos)
                         if (numeroDestino.length === 9) {
                             numeroDestino = '258' + numeroDestino;
                             console.log(`🔄 Convertido para 12 dígitos: ${numeroDestino}`);
@@ -3739,11 +3819,27 @@ async function processMessage(message) {
                         console.log(`💰 Saldo atualizado em ambos formatos: ${saldoAnterior}MB → ${bonusSaldos[participantIdCus].saldo}MB (+${quantidadeMB}MB)`);
                         console.log(`📝 Histórico de bônus admin atualizado (${bonusSaldos[participantIdCus].bonusAdmin.length} registros)`);
 
+                        // DEBUG: Verificar como o beneficiário pode consultar
+                        console.log(`\n🔍 === DEBUG: COMO CONSULTAR O BÔNUS ===`);
+                        console.log(`📋 Beneficiário pode consultar com qualquer formato:`);
+                        console.log(`   1. .saldo (se estiver como ${participantIdCus})`);
+                        console.log(`   2. .saldo (se estiver como ${participantIdLid})`);
+                        console.log(`   3. .saldo (se estiver como ${numeroDestino})`);
+                        console.log(`💡 Saldos salvos:`);
+                        console.log(`   - ${participantIdCus}: ${bonusSaldos[participantIdCus]?.saldo || 0}MB`);
+                        console.log(`   - ${participantIdLid}: ${bonusSaldos[participantIdLid]?.saldo || 0}MB`);
+
                         // Usar @c.us como principal para referência
                         const participantId = participantIdCus;
 
-                        // Salvar dados após conceder bônus
-                        agendarSalvamento();
+                        // Salvar dados IMEDIATAMENTE após conceder bônus (crítico!)
+                        console.log(`💾 Salvando dados de bônus imediatamente...`);
+                        try {
+                            await salvarDadosReferencia();
+                            console.log(`✅ Dados de bônus salvos com sucesso!`);
+                        } catch (erroSalvamento) {
+                            console.error(`❌ ERRO CRÍTICO ao salvar bônus:`, erroSalvamento);
+                        }
 
                         const quantidadeFormatada = quantidadeMB >= 1024 ? `${(quantidadeMB/1024).toFixed(2)}GB` : `${quantidadeMB}MB`;
                         const novoSaldo = bonusSaldos[participantId].saldo;
@@ -4553,7 +4649,8 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
 
             // .bonus - Ver saldo de bônus
             if (comando === '.bonus' || comando === '.saldo') {
-                const saldo = bonusSaldos[remetente];
+                console.log(`🔍 Buscando saldo para: ${remetente}`);
+                const saldo = await buscarSaldoBonus(remetente);
                 
                 if (!saldo || saldo.saldo === 0) {
                     await message.reply(
@@ -4629,8 +4726,9 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                     return;
                 }
                 
-                // Verificar saldo
-                const saldo = bonusSaldos[remetente];
+                // Verificar saldo (buscar em todos os formatos)
+                console.log(`🔍 Buscando saldo para saque: ${remetente}`);
+                const saldo = await buscarSaldoBonus(remetente);
                 if (!saldo || saldo.saldo < quantidadeMB) {
                     const saldoAtual = saldo ? saldo.saldo : 0;
                     await message.reply(
@@ -4667,14 +4765,16 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                 
                 // Salvar pedido
                 pedidosSaque[referenciaSaque] = pedido;
-                
-                // Debitar do saldo
-                bonusSaldos[remetente].saldo -= quantidadeMB;
-                bonusSaldos[remetente].historicoSaques = bonusSaldos[remetente].historicoSaques || [];
-                bonusSaldos[remetente].historicoSaques.push({
-                    referencia: referenciaSaque,
-                    quantidade: quantidadeMB,
-                    data: agora.toISOString()
+
+                // Debitar do saldo em todos os formatos
+                await atualizarSaldoBonus(remetente, (saldoObj) => {
+                    saldoObj.saldo -= quantidadeMB;
+                    saldoObj.historicoSaques = saldoObj.historicoSaques || [];
+                    saldoObj.historicoSaques.push({
+                        referencia: referenciaSaque,
+                        quantidade: quantidadeMB,
+                        data: agora.toISOString()
+                    });
                 });
 
                 // Salvar dados após criar saque
@@ -4688,7 +4788,8 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                 }
                 
                 const quantidadeFormatada = quantidadeMB >= 1024 ? `${(quantidadeMB/1024).toFixed(2)}GB` : `${quantidadeMB}MB`;
-                const novoSaldo = bonusSaldos[remetente].saldo;
+                const saldoAtualizado = await buscarSaldoBonus(remetente);
+                const novoSaldo = saldoAtualizado ? saldoAtualizado.saldo : 0;
                 
                 await message.reply(
                     `✅ *SOLICITAÇÃO DE SAQUE CRIADA*\n\n` +
