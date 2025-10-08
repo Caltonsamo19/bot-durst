@@ -1923,6 +1923,7 @@ Importante 🚨: Envie o valor que consta na tabela!
 
 
 
+
 // === FUNÇÃO GOOGLE SHEETS ===
 
 // Função para retry automático
