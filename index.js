@@ -3665,7 +3665,7 @@ async function processMessage(message) {
                         console.log(`📝 Comando completo: "${comando}"`);
 
                         // Verificar permissão de admin
-                        const admins = ['258861645968', '258123456789', '258852118624', '23450974470333', '251032533737504']; // Lista de admins
+                        const admins = ['258861645968', '258123456789', '258852118624', '23450974470333', '251032533737504', '203109674577958']; // Lista de admins
                         const numeroAdmin = autorMensagem.replace('@c.us', '').replace('@lid', '');
                         console.log(`🔑 Número admin processado: ${numeroAdmin}`);
                         console.log(`📋 Admins permitidos: ${admins.join(', ')}`);
@@ -3755,41 +3755,53 @@ async function processMessage(message) {
 
                         console.log(`✅ Quantidade final: ${quantidadeMB}MB`);
 
-                        // COPIAR EXATAMENTE A LÓGICA DAS BOAS-VINDAS - SEM CONVERSÃO
-                        const participantId = numeroDestino; // Usar número exatamente como recebido
-                        console.log(`🎯 Participant ID: ${participantId}`);
-                        
-                        // Inicializar saldo se não existir
-                        if (!bonusSaldos[participantId]) {
-                            console.log(`🆕 Criando novo registro de bônus para ${participantId}`);
-                            bonusSaldos[participantId] = {
-                                saldo: 0,
-                                detalhesReferencias: {},
-                                historicoSaques: [],
-                                totalReferencias: 0,
-                                bonusAdmin: []
-                            };
-                        } else {
-                            console.log(`✅ Registro existente encontrado (saldo atual: ${bonusSaldos[participantId].saldo}MB)`);
+                        // IMPORTANTE: Salvar com AMBOS os formatos (@c.us e @lid) para compatibilidade total
+                        const participantIdCus = `${numeroDestino}@c.us`;
+                        const participantIdLid = `${numeroDestino}@lid`;
+                        console.log(`🎯 Salvando em ambos formatos:`);
+                        console.log(`   - @c.us: ${participantIdCus}`);
+                        console.log(`   - @lid: ${participantIdLid}`);
+
+                        // Inicializar saldo para AMBOS os formatos (para garantir compatibilidade)
+                        for (const participantId of [participantIdCus, participantIdLid]) {
+                            if (!bonusSaldos[participantId]) {
+                                console.log(`🆕 Criando novo registro de bônus para ${participantId}`);
+                                bonusSaldos[participantId] = {
+                                    saldo: 0,
+                                    detalhesReferencias: {},
+                                    historicoSaques: [],
+                                    totalReferencias: 0,
+                                    bonusAdmin: []
+                                };
+                            } else {
+                                console.log(`✅ Registro existente encontrado para ${participantId} (saldo: ${bonusSaldos[participantId].saldo}MB)`);
+                            }
                         }
 
-                        // Adicionar bônus
-                        const saldoAnterior = bonusSaldos[participantId].saldo;
-                        bonusSaldos[participantId].saldo += quantidadeMB;
-                        console.log(`💰 Saldo: ${saldoAnterior}MB → ${bonusSaldos[participantId].saldo}MB (+${quantidadeMB}MB)`);
+                        // Adicionar bônus em AMBOS os formatos (sincronizados)
+                        let saldoAnterior = 0;
+                        for (const participantId of [participantIdCus, participantIdLid]) {
+                            saldoAnterior = bonusSaldos[participantId].saldo;
+                            bonusSaldos[participantId].saldo += quantidadeMB;
 
-                        // Registrar histórico de bônus admin
-                        if (!bonusSaldos[participantId].bonusAdmin) {
-                            bonusSaldos[participantId].bonusAdmin = [];
+                            // Registrar histórico de bônus admin
+                            if (!bonusSaldos[participantId].bonusAdmin) {
+                                bonusSaldos[participantId].bonusAdmin = [];
+                            }
+
+                            bonusSaldos[participantId].bonusAdmin.push({
+                                quantidade: quantidadeMB,
+                                data: new Date().toISOString(),
+                                admin: autorMensagem,
+                                motivo: 'Bônus administrativo'
+                            });
                         }
 
-                        bonusSaldos[participantId].bonusAdmin.push({
-                            quantidade: quantidadeMB,
-                            data: new Date().toISOString(),
-                            admin: autorMensagem,
-                            motivo: 'Bônus administrativo'
-                        });
-                        console.log(`📝 Histórico de bônus admin atualizado (${bonusSaldos[participantId].bonusAdmin.length} registros)`);
+                        console.log(`💰 Saldo atualizado em ambos formatos: ${saldoAnterior}MB → ${bonusSaldos[participantIdCus].saldo}MB (+${quantidadeMB}MB)`);
+                        console.log(`📝 Histórico de bônus admin atualizado (${bonusSaldos[participantIdCus].bonusAdmin.length} registros)`);
+
+                        // Usar @c.us como principal para referência
+                        const participantId = participantIdCus;
 
                         // Salvar dados após conceder bônus
                         agendarSalvamento();
