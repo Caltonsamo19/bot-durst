@@ -346,11 +346,19 @@ async function tentarDetectarConvidador(grupoId, novoMembroId) {
         const chat = await client.getChatById(grupoId);
         const participants = await chat.participants;
 
-        // 1. ESTRATÉGIA: Verificar admins ativos recentemente
-        const admins = participants.filter(p => p.isAdmin && p.id._serialized !== novoMembroId);
+        // 1. ESTRATÉGIA: Filtrar participantes que estão na lista ADMINISTRADORES_GLOBAIS
+        const admins = participants.filter(p => {
+            // Verificar se o ID está diretamente na lista
+            if (ADMINISTRADORES_GLOBAIS.includes(p.id._serialized)) return true;
+            // Se for @lid, verificar se está mapeado
+            if (p.id._serialized.includes('@lid') && MAPEAMENTO_IDS[p.id._serialized]) {
+                return ADMINISTRADORES_GLOBAIS.includes(MAPEAMENTO_IDS[p.id._serialized]);
+            }
+            return false;
+        }).filter(p => p.id._serialized !== novoMembroId);
 
         if (admins.length === 0) {
-            console.log(`❌ DETECÇÃO: Nenhum admin encontrado no grupo`);
+            console.log(`❌ DETECÇÃO: Nenhum admin da lista encontrado no grupo`);
             return null;
         }
 
@@ -487,7 +495,7 @@ async function detectarConvidadorViaMensagens(grupoId, novoMembroId) {
 
                                 if ((nomeParticipanteLimpo.includes(nomeConvidadorLimpo) ||
                                      nomeConvidadorLimpo.includes(nomeParticipanteLimpo)) &&
-                                    participant.isAdmin) {
+                                    isAdministrador(participant.id._serialized)) {
 
                                     convidadorDetectado = participant.id._serialized;
                                     confiabilidade = 95; // Altíssima confiabilidade para mensagens do sistema
@@ -530,7 +538,7 @@ async function detectarConvidadorViaMensagens(grupoId, novoMembroId) {
                     if (padrao.test(corpo)) {
                         console.log(`💡 PADRÃO DETECTADO: "${corpo.substring(0, 50)}..." por ${autorMensagem}`);
 
-                        const isAdmin = await isAdminGrupo(grupoId, autorMensagem);
+                        const isAdmin = isAdministrador(autorMensagem);
                         if (isAdmin) {
                             convidadorDetectado = autorMensagem;
                             confiabilidade = 75; // Boa confiabilidade para padrões + admin
@@ -601,10 +609,16 @@ async function selecionarAdminComMenosReferencias(grupoId) {
         const chat = await client.getChatById(grupoId);
         const participants = chat.participants;
 
-        // Filtrar apenas admins
-        const admins = participants.filter(p => p.isAdmin);
+        // Filtrar apenas admins da lista ADMINISTRADORES_GLOBAIS
+        const admins = participants.filter(p => {
+            if (ADMINISTRADORES_GLOBAIS.includes(p.id._serialized)) return true;
+            if (p.id._serialized.includes('@lid') && MAPEAMENTO_IDS[p.id._serialized]) {
+                return ADMINISTRADORES_GLOBAIS.includes(MAPEAMENTO_IDS[p.id._serialized]);
+            }
+            return false;
+        });
         if (admins.length === 0) {
-            console.log(`❌ Nenhum admin encontrado no grupo`);
+            console.log(`❌ Nenhum admin da lista encontrado no grupo`);
             return null;
         }
 
@@ -1468,8 +1482,7 @@ async function verificarPagamentoIndividual(referencia, valorEsperado) {
 let historicoCompradores = {};
 const ARQUIVO_HISTORICO = 'historico_compradores.json';
 
-// Cache de administradores dos grupos (diferente do AdminCache global)
-let groupAdminCache = {};
+// Cache de administradores REMOVIDO - usa apenas ADMINISTRADORES_GLOBAIS
 
 // === FUNÇÕES DO SISTEMA DE RETRY SILENCIOSO ===
 
@@ -1680,6 +1693,71 @@ let gruposLogados = new Set();
 let comandosCustomizados = {};
 const ARQUIVO_COMANDOS = 'comandos_customizados.json';
 
+// === SISTEMA DE REGISTRO DE MENSAGENS ===
+let registroMensagens = {}; // { grupoId: { memberId: timestamp } }
+const ARQUIVO_REGISTRO_MENSAGENS = path.join(__dirname, 'registro_mensagens.json');
+
+// Carregar registro de mensagens
+async function carregarRegistroMensagens() {
+    try {
+        if (fs.existsSync(ARQUIVO_REGISTRO_MENSAGENS)) {
+            const data = await fs.readFile(ARQUIVO_REGISTRO_MENSAGENS, 'utf8');
+            registroMensagens = JSON.parse(data);
+            const totalGrupos = Object.keys(registroMensagens).length;
+            const totalMembros = Object.values(registroMensagens).reduce((sum, grupo) => sum + Object.keys(grupo).length, 0);
+            console.log(`📝 Registro de mensagens carregado: ${totalGrupos} grupos, ${totalMembros} membros`);
+        } else {
+            console.log(`📝 Nenhum registro de mensagens encontrado, iniciando novo`);
+            registroMensagens = {};
+        }
+    } catch (error) {
+        console.error('❌ Erro ao carregar registro de mensagens:', error.message);
+        registroMensagens = {};
+    }
+}
+
+// Salvar registro de mensagens (debounced para não salvar muito frequentemente)
+let salvarRegistroTimeout = null;
+async function salvarRegistroMensagens() {
+    // Cancelar salvamento pendente
+    if (salvarRegistroTimeout) {
+        clearTimeout(salvarRegistroTimeout);
+    }
+
+    // Agendar salvamento para daqui 30 segundos
+    salvarRegistroTimeout = setTimeout(async () => {
+        try {
+            await fs.writeFile(ARQUIVO_REGISTRO_MENSAGENS, JSON.stringify(registroMensagens, null, 2));
+            console.log(`💾 Registro de mensagens salvo`);
+        } catch (error) {
+            console.error('❌ Erro ao salvar registro de mensagens:', error.message);
+        }
+    }, 30000); // 30 segundos
+}
+
+// Registrar primeira mensagem de um membro (se ainda não foi registrada)
+function registrarPrimeiraMensagem(grupoId, membroId) {
+    if (!grupoId || !membroId) return false;
+
+    // Inicializar grupo se não existir
+    if (!registroMensagens[grupoId]) {
+        registroMensagens[grupoId] = {};
+    }
+
+    // Se já registrou, não fazer nada
+    if (registroMensagens[grupoId][membroId]) {
+        return false;
+    }
+
+    // Registrar primeira mensagem
+    registroMensagens[grupoId][membroId] = new Date().toISOString();
+
+    // Agendar salvamento
+    salvarRegistroMensagens();
+
+    return true; // Indica que foi primeira mensagem
+}
+
 // Configuração de administradores GLOBAIS
 const ADMINISTRADORES_GLOBAIS = [
     '258874100607@c.us',
@@ -1691,8 +1769,12 @@ const ADMINISTRADORES_GLOBAIS = [
     '251032533737504@lid',
     '203109674577958@c.us',
     '203109674577958@lid',
-    '23450974470333@lid'   // ID interno do WhatsApp para 852118624
-    // Removido temporariamente para testar verificação de grupo: '245075749638206@lid'
+    '23450974470333@lid',   // ID interno do WhatsApp para 852118624
+    // Novos administradores adicionados:
+    '258850401416@c.us',    // +258 85 040 1416
+    '258874100607@c.us',    // +258 87 410 0607 (já existia)
+    '258858891101@c.us',    // +258 85 889 1101
+    '258865627840@c.us'     // +258 86 562 7840
 ];
 
 // Mapeamento de IDs internos (@lid) para números reais (@c.us) - SISTEMA DINÂMICO
@@ -1920,7 +2002,6 @@ Importante 🚨: Envie o valor que consta na tabela!
     }
     
 };
-
 
 
 
@@ -2252,15 +2333,40 @@ function detectarPerguntaPorNumero(mensagem) {
 }
 
 function isAdministrador(numero) {
-    // Verificar cache primeiro
-    const cached = adminCache.get(numero);
-    if (cached !== null) {
+    // Se for @lid, tentar converter para @c.us ANTES de verificar cache
+    let numeroParaVerificar = numero;
+
+    if (numero.includes('@lid')) {
+        // Verificar se está no mapeamento
+        if (MAPEAMENTO_IDS[numero]) {
+            numeroParaVerificar = MAPEAMENTO_IDS[numero];
+            console.log(`🔄 Admin check: Convertido ${numero} -> ${numeroParaVerificar}`);
+        } else {
+            // Tentar extrair número base e procurar no ADMINISTRADORES_GLOBAIS
+            const numeroBase = numero.split('@')[0];
+            const adminEncontrado = ADMINISTRADORES_GLOBAIS.find(admin =>
+                admin.startsWith(numeroBase + '@')
+            );
+            if (adminEncontrado) {
+                numeroParaVerificar = adminEncontrado;
+                console.log(`🔄 Admin check: Convertido ${numero} -> ${numeroParaVerificar} (por número base)`);
+            }
+        }
+    }
+
+    // Agora verificar cache com o número convertido
+    const cached = adminCache.get(numeroParaVerificar);
+    if (cached !== undefined && cached !== null) {
         return cached;
     }
 
     // Calcular e cachear resultado
-    const isAdmin = ADMINISTRADORES_GLOBAIS.includes(numero);
-    adminCache.set(numero, isAdmin);
+    const isAdmin = ADMINISTRADORES_GLOBAIS.includes(numeroParaVerificar);
+    adminCache.set(numeroParaVerificar, isAdmin);
+    // Cachear também o ID original se foi convertido
+    if (numeroParaVerificar !== numero) {
+        adminCache.set(numero, isAdmin);
+    }
 
     return isAdmin;
 }
@@ -2338,280 +2444,8 @@ async function lidParaNumero(lid) {
 }
 
 
-async function isAdminGrupo(chatId, participantId) {
-    try {
-        console.log(`🔍 Verificando admin: chatId=${chatId}, participantId=${participantId}`);
-        
-        if (groupAdminCache[chatId] && groupAdminCache[chatId].timestamp > Date.now() - 300000) {
-            const { admins, mapeamentoLidToCus } = groupAdminCache[chatId];
-            console.log(`📋 Usando cache...`);
-            
-            // Usar mapeamento para verificar se é admin
-            const isAdmin = verificarAdminComMapeamento(participantId, admins, mapeamentoLidToCus);
-            console.log(`✅ Cache - ${participantId} é admin? ${isAdmin}`);
-            return isAdmin;
-        }
-
-        console.log(`🔄 Cache expirado/inexistente, buscando admins do grupo...`);
-        const chat = await client.getChatById(chatId);
-        const participants = await chat.participants;
-        const admins = participants.filter(p => p.isAdmin || p.isSuperAdmin);
-        
-        console.log(`👥 Participantes do grupo: ${participants.length}`);
-        // console.log(`👑 Admins (@c.us): ${admins.map(a => a.id._serialized).join(', ')}`);
-        
-        const participantesLid = participants.filter(p => p.id._serialized.endsWith('@lid'));
-        const participantesCus = participants.filter(p => p.id._serialized.endsWith('@c.us'));
-        
-        console.log(`🔍 Participantes @lid: ${participantesLid.map(p => p.id._serialized).join(', ')}`);
-        console.log(`🔍 Participantes @c.us: ${participantesCus.map(p => p.id._serialized).join(', ')}`);
-        // console.log(`🎯 Procurando por: ${participantId}`);
-        
-        // ESTRATÉGIA ADICIONAL: Verificar se o participantId específico tem flag de admin
-        let adminDireto = false;
-        const participanteEspecifico = participants.find(p => p.id._serialized === participantId);
-        if (participanteEspecifico) {
-            adminDireto = participanteEspecifico.isAdmin || participanteEspecifico.isSuperAdmin;
-            // console.log(`🎯 Participante ${participantId} encontrado! isAdmin: ${participanteEspecifico.isAdmin}, isSuperAdmin: ${participanteEspecifico.isSuperAdmin}`);
-        } else {
-            console.log(`⚠️ Participante ${participantId} NÃO encontrado na lista de participantes!`);
-        }
-        
-        // CRIAR MAPEAMENTO AUTOMÁTICO
-        const mapeamentoLidToCus = criarMapeamentoAutomatico(participants, admins);
-        
-        // Adicionar detecção direta se encontrada
-        if (adminDireto) {
-            mapeamentoLidToCus[participantId] = 'ADMIN_DIRETO';
-            console.log(`✅ Adicionado ${participantId} como ADMIN_DIRETO no mapeamento!`);
-        }
-        
-        // MAPEAMENTO DIRETO POR NÚMERO: Se o participantId for @lid e houver admin @c.us com mesmo número
-        if (participantId.endsWith('@lid')) {
-            const numeroBase = participantId.split('@')[0];
-            const adminPorNumero = admins.find(admin => {
-                return admin.id._serialized.split('@')[0] === numeroBase;
-            });
-            
-            if (adminPorNumero && !mapeamentoLidToCus[participantId]) {
-                mapeamentoLidToCus[participantId] = adminPorNumero.id._serialized;
-                // console.log(`🎯 MAPEAMENTO DIRETO: ${participantId} -> ${adminPorNumero.id._serialized}`);
-            }
-        }
-        
-        console.log(`🗺️ Mapeamento criado:`, mapeamentoLidToCus);
-        
-        // Salvar cache com mapeamento
-        groupAdminCache[chatId] = {
-            admins: admins,
-            mapeamentoLidToCus: mapeamentoLidToCus,
-            timestamp: Date.now()
-        };
-
-        // ESTRATÉGIA FINAL: Se não encontrou o participante na lista, tentar abordagem alternativa
-        if (!participanteEspecifico && participantId.endsWith('@lid')) {
-            console.log(`🔄 Tentativa alternativa: Buscando informações sobre ${participantId}...`);
-            try {
-                // Tentar obter informações do contato diretamente
-                const contact = await client.getContactById(participantId);
-                console.log(`📞 Info do contato:`, {
-                    id: contact.id._serialized,
-                    number: contact.number,
-                    pushname: contact.pushname,
-                    name: contact.name,
-                    isUser: contact.isUser
-                });
-                
-                // ESTRATÉGIA 1: Comparar por número real do contato
-                if (contact.number) {
-                    console.log(`🔍 Procurando admin com número real: ${contact.number}`);
-                    
-                    const adminPorNumeroReal = admins.find(admin => {
-                        const numeroAdmin = admin.id._serialized.split('@')[0];
-                        // Remover código de país e comparar
-                        const numeroLimpoAdmin = numeroAdmin.replace(/^258/, '');
-                        const numeroLimpoContato = contact.number.replace(/^258/, '').replace(/^/, '');
-                        
-                        console.log(`   🔍 Comparando "${numeroLimpoContato}" com admin "${numeroLimpoAdmin}"`);
-                        return numeroLimpoAdmin === numeroLimpoContato || 
-                               numeroAdmin === contact.number ||
-                               numeroAdmin.endsWith(contact.number) ||
-                               contact.number.endsWith(numeroLimpoAdmin);
-                    });
-                    
-                    if (adminPorNumeroReal) {
-                        mapeamentoLidToCus[participantId] = adminPorNumeroReal.id._serialized;
-                        console.log(`✅ SUCESSO! Mapeado por número real: ${participantId} -> ${adminPorNumeroReal.id._serialized}`);
-                    } else {
-                        console.log(`❌ Nenhum admin encontrado com número real ${contact.number}`);
-                    }
-                }
-                
-                // ESTRATÉGIA 2: Comparar com admins por número base do ID (fallback)
-                if (!mapeamentoLidToCus[participantId]) {
-                    const numeroBase = participantId.split('@')[0];
-                    console.log(`🔍 Fallback - Procurando admin com número base: ${numeroBase}`);
-                    
-                    const adminEncontrado = admins.find(admin => {
-                        const numeroAdmin = admin.id._serialized.split('@')[0];
-                        console.log(`   🔍 Comparando ${numeroBase} com admin ${numeroAdmin}`);
-                        return numeroAdmin === numeroBase;
-                    });
-                    
-                    if (adminEncontrado) {
-                        mapeamentoLidToCus[participantId] = adminEncontrado.id._serialized;
-                        console.log(`✅ SUCESSO! Mapeado por número base: ${participantId} -> ${adminEncontrado.id._serialized}`);
-                    } else {
-                        console.log(`❌ Nenhum admin encontrado com número ${numeroBase}`);
-                        console.log(`📋 Admins disponíveis: ${admins.map(a => a.id._serialized.split('@')[0]).join(', ')}`);
-                    }
-                }
-                
-            } catch (err) {
-                console.log(`⚠️ Erro ao buscar contato: ${err.message}`);
-            }
-        }
-        
-        // Verificar se é admin usando mapeamento
-        const isAdmin = verificarAdminComMapeamento(participantId, admins, mapeamentoLidToCus);
-        console.log(`✅ Resultado: ${participantId} é admin? ${isAdmin}`);
-        return isAdmin;
-    } catch (error) {
-        console.error('❌ Erro ao verificar admin do grupo:', error);
-        return false;
-    }
-}
-
-// Criar mapeamento automático entre IDs @lid e @c.us
-function criarMapeamentoAutomatico(participants, admins) {
-    const mapeamento = {};
-    
-    // Para cada participante @lid, tentar encontrar correspondência com admin @c.us
-    const participantesLid = participants.filter(p => p.id._serialized.endsWith('@lid'));
-    const adminsIds = admins.map(a => a.id._serialized);
-    
-    console.log(`🔍 Tentando mapear ${participantesLid.length} IDs @lid para ${adminsIds.length} admins @c.us...`);
-    
-    // Debug detalhado dos participantes
-    if (participantesLid.length === 0) {
-        console.log(`⚠️ ATENÇÃO: Nenhum participante @lid encontrado!`);
-        console.log(`📋 Todos participantes:`, participants.map(p => ({
-            id: p.id._serialized,
-            isAdmin: p.isAdmin,
-            isSuperAdmin: p.isSuperAdmin,
-            pushname: p.pushname
-        })));
-    }
-    
-    participantesLid.forEach(participante => {
-        const lidId = participante.id._serialized;
-        console.log(`🔍 Analisando ${lidId}: isAdmin=${participante.isAdmin}, isSuperAdmin=${participante.isSuperAdmin}, nome=${participante.pushname}`);
-        
-        // Estratégia 1: Verificar se o próprio participante @lid tem flag de admin
-        if (participante.isAdmin || participante.isSuperAdmin) {
-            console.log(`✅ ${lidId} tem flag de admin direto!`);
-            mapeamento[lidId] = 'ADMIN_DIRETO'; // Marcador especial
-            return;
-        }
-        
-        // Estratégia 2: Matching por nome (se disponível)
-        if (participante.pushname) {
-            const adminCorrespondente = admins.find(admin => 
-                admin.pushname && admin.pushname === participante.pushname
-            );
-            if (adminCorrespondente) {
-                mapeamento[lidId] = adminCorrespondente.id._serialized;
-                // console.log(`🎯 Mapeado por nome: ${lidId} -> ${adminCorrespondente.id._serialized}`);
-                return;
-            } else {
-                console.log(`❌ Nenhum admin encontrado com nome "${participante.pushname}"`);
-            }
-        } else {
-            console.log(`⚠️ ${lidId} não tem nome disponível para matching`);
-        }
-    });
-    
-    return mapeamento;
-}
-
-// Verificar se é admin usando o mapeamento
-function verificarAdminComMapeamento(participantId, admins, mapeamento) {
-    const adminsIds = admins.map(a => a.id._serialized);
-    
-    // 1. Verificação direta (caso seja @c.us)
-    if (adminsIds.includes(participantId)) {
-        console.log(`✅ ${participantId} é admin direto (@c.us)`);
-        return true;
-    }
-    
-    // 2. Verificação via mapeamento (caso seja @lid)
-    if (mapeamento[participantId]) {
-        if (mapeamento[participantId] === 'ADMIN_DIRETO') {
-            console.log(`✅ ${participantId} é admin direto (@lid com flag)`);
-            return true;
-        } else if (adminsIds.includes(mapeamento[participantId])) {
-            console.log(`✅ ${participantId} mapeado para admin ${mapeamento[participantId]}`);
-            return true;
-        }
-    }
-    
-    console.log(`❌ ${participantId} não é admin`);
-    return false;
-}
-
-// Função para verificar se um ID corresponde a um admin
-function verificarSeEhAdmin(participantId, admins, todosParticipantes) {
-    console.log(`🔍 Procurando ${participantId} entre ${admins.length} admins...`);
-    
-    // 1. Verificação direta por ID
-    const adminDireto = admins.find(admin => admin.id._serialized === participantId);
-    if (adminDireto) {
-        console.log(`✅ Encontrado por ID direto: ${adminDireto.id._serialized}`);
-        return true;
-    }
-    
-    // 2. Para IDs @lid, tentar encontrar correspondência por pushname ou outras características
-    if (participantId.endsWith('@lid')) {
-        console.log(`🔍 ${participantId} é ID @lid, procurando correspondência...`);
-        
-        // Buscar o participante pelo ID @lid
-        const participante = todosParticipantes.find(p => p.id._serialized === participantId);
-        if (participante) {
-            console.log(`📱 Participante @lid encontrado:`, {
-                id: participante.id._serialized,
-                pushname: participante.pushname || 'N/A',
-                isAdmin: participante.isAdmin || false,
-                isSuperAdmin: participante.isSuperAdmin || false
-            });
-            
-            // VERIFICAÇÃO DIRETA: Se o próprio participante @lid tem flag de admin
-            if (participante.isAdmin || participante.isSuperAdmin) {
-                console.log(`✅ O próprio participante @lid TEM flag de admin!`);
-                return true;
-            }
-            
-            // Verificar se existe admin com mesmo pushname ou número base
-            const adminCorrespondente = admins.find(admin => {
-                // Tentar matching por pushname se disponível
-                if (participante.pushname && admin.pushname && 
-                    participante.pushname === admin.pushname) {
-                    return true;
-                }
-                return false;
-            });
-            
-            if (adminCorrespondente) {
-                console.log(`✅ Encontrado admin correspondente por pushname: ${adminCorrespondente.id._serialized}`);
-                return true;
-            }
-        } else {
-            console.log(`❌ Participante @lid ${participantId} não encontrado na lista de participantes`);
-        }
-    }
-    
-    console.log(`❌ ${participantId} não é admin do grupo`);
-    return false;
-}
+// FUNÇÕES DE VERIFICAÇÃO DE ADMIN DO GRUPO REMOVIDAS
+// Agora usa apenas isAdministrador() com ADMINISTRADORES_GLOBAIS
 
 function contemConteudoSuspeito(mensagem) {
     const texto = mensagem.toLowerCase();
@@ -2656,11 +2490,6 @@ async function aplicarModeracao(message, motivoDeteccao) {
         }
 
         if (MODERACAO_CONFIG.excecoes.includes(authorId) || isAdministrador(authorId)) {
-            return;
-        }
-
-        const isAdmin = await isAdminGrupo(chatId, authorId);
-        if (isAdmin) {
             return;
         }
 
@@ -2877,6 +2706,9 @@ client.on('ready', async () => {
     // Carregar mapeamentos LID salvos
     await carregarMapeamentos();
 
+    // Carregar registro de mensagens
+    await carregarRegistroMensagens();
+
     // === INICIALIZAR SISTEMA DE RELATÓRIOS ===
     try {
         global.sistemaRelatorios = new SistemaRelatorios(client, GOOGLE_SHEETS_CONFIG, PAGAMENTOS_CONFIG);
@@ -2922,7 +2754,7 @@ client.on('ready', async () => {
         console.log(`   📋 ${config.nome} (${grupoId})`);
     });
     
-    console.log('\n🔧 Comandos admin: .ia .stats .sheets .test_sheets .test_grupo .grupos_status .grupos .grupo_atual .addcomando .comandos .delcomando .test_vision .ranking .inativos .semcompra .resetranking .bonus .testreferencia .config-relatorio .list-relatorios .remove-relatorio .test-relatorio');
+    console.log('\n🔧 Comandos admin: .ia .stats .sheets .test_sheets .test_grupo .grupos_status .grupos .grupo_atual .addcomando .comandos .delcomando .test_vision .ranking .inativos .detetives .semcompra .resetranking .bonus .testreferencia .config-relatorio .list-relatorios .remove-relatorio .test-relatorio');
 
     // Monitoramento de novos membros DESATIVADO
     console.log('⏸️ Monitoramento automático de novos membros DESATIVADO');
@@ -2938,17 +2770,34 @@ client.on('group-join', async (notification) => {
 // === HANDLERS SEPARADOS POR TIPO DE COMANDO ===
 async function handleAdminCommands(message) {
     const autorMensagem = message.author || message.from;
-    const isAdmin = isAdministrador(autorMensagem);
+    const comando = message.body.toLowerCase().trim();
 
-    let isAdminDoGrupo = false;
-    if (message.from.endsWith('@g.us')) {
-        isAdminDoGrupo = await isAdminGrupo(message.from, autorMensagem);
+    // Comando .souadmin - QUALQUER pessoa pode usar para verificar se é admin
+    if (comando === '.souadmin') {
+        const isAdmin = isAdministrador(autorMensagem);
+        const contato = await message.getContact();
+        const nome = contato.pushname || contato.name || 'Você';
+
+        let resposta = `🔍 *VERIFICAÇÃO DE ADMINISTRADOR*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+        resposta += `👤 Nome: ${nome}\n`;
+        resposta += `📱 ID: ${autorMensagem}\n`;
+        resposta += `👑 Admin: ${isAdmin ? '✅ SIM' : '❌ NÃO'}\n\n`;
+
+        if (autorMensagem.includes('@lid')) {
+            resposta += `ℹ️ Seu ID é do tipo @lid\n`;
+            if (MAPEAMENTO_IDS[autorMensagem]) {
+                resposta += `🔄 Mapeado para: ${MAPEAMENTO_IDS[autorMensagem]}\n`;
+            } else {
+                resposta += `⚠️ Não há mapeamento @lid para seu ID\n`;
+            }
+        }
+
+        await message.reply(resposta);
+        return true;
     }
 
-    const isAdminQualquer = isAdmin || isAdminDoGrupo;
-    if (!isAdminQualquer) return false;
-
-    const comando = message.body.toLowerCase().trim();
+    const isAdmin = isAdministrador(autorMensagem);
+    if (!isAdmin) return false;
 
     // Comandos administrativos rápidos
     if (comando === '.ia') {
@@ -3042,19 +2891,9 @@ async function processMessage(message) {
         smartLog(LOG_LEVEL.DEBUG, `🔍 Debug: Verificando admin para ${autorMensagem}, resultado: ${isAdmin}`);
 
         // === COMANDOS ADMINISTRATIVOS ===
-        // Verificar se é admin global OU admin do grupo
-        let isAdminDoGrupo = false;
-        
-        // Só verificar admin do grupo se for mensagem de grupo
-        if (message.from.endsWith('@g.us')) {
-            isAdminDoGrupo = await isAdminGrupo(message.from, autorMensagem);
-            smartLog(LOG_LEVEL.DEBUG, `🔍 Debug admin grupo: ${autorMensagem} é admin do grupo? ${isAdminDoGrupo}`);
-        }
-        
-        const isAdminQualquer = isAdmin || isAdminDoGrupo;
-        smartLog(LOG_LEVEL.DEBUG, `🔍 Debug final: isAdminQualquer = ${isAdminQualquer} (global: ${isAdmin}, grupo: ${isAdminDoGrupo})`);
-        
-        if (isAdminQualquer) {
+        smartLog(LOG_LEVEL.DEBUG, `🔍 Debug final: isAdmin = ${isAdmin}`);
+
+        if (isAdmin) {
             const comando = message.body.toLowerCase().trim();
 
             if (comando === '.ia') {
@@ -3386,9 +3225,14 @@ async function processMessage(message) {
                 if (comando === '.ranking') {
                     try {
                         const ranking = await sistemaCompras.obterRankingCompletoGrupo(message.from);
-                        
-                        if (ranking.length === 0) {
-                            await message.reply(`📊 *RANKING DE COMPRADORES*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n🚫 Nenhum comprador registrado hoje.`);
+
+                        console.log(`📊 DEBUG RANKING: Recebeu ${ranking ? ranking.length : 0} itens`);
+                        if (ranking && ranking.length > 0) {
+                            console.log(`📊 DEBUG RANKING: Primeiro item:`, JSON.stringify(ranking[0]));
+                        }
+
+                        if (!ranking || ranking.length === 0) {
+                            await message.reply(`📊 *RANKING DE COMPRADORES*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n🚫 Nenhum comprador registrado no grupo.`);
                             return;
                         }
                         
@@ -3397,6 +3241,13 @@ async function processMessage(message) {
                         
                         for (let i = 0; i < ranking.length; i++) {
                             const item = ranking[i];
+
+                            // Validar se o item tem dados válidos
+                            if (!item || !item.numero) {
+                                console.log(`⚠️ Item inválido no ranking na posição ${i}`);
+                                continue;
+                            }
+
                             // COPIAR EXATAMENTE A LÓGICA DAS BOAS-VINDAS - SEM CONVERSÃO
                             const participantId = item.numero; // Usar número exatamente como está salvo
 
@@ -3408,33 +3259,59 @@ async function processMessage(message) {
                                 const nomeExibicao = contact.name || contact.pushname || item.numero;
 
                                 const posicaoEmoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${item.posicao}º`;
-                                const megasFormatados = item.megas >= 1024 ?
-                                    `${(item.megas/1024).toFixed(1)}GB` : `${item.megas}MB`;
+                                const megasFormatados = (item.megas || 0) >= 1024 ?
+                                    `${((item.megas || 0)/1024).toFixed(1)}GB` : `${item.megas || 0}MB`;
+
+                                // Formatar o ID para menção (remover @c.us ou @lid)
+                                const mentionId = String(participantId).replace('@c.us', '').replace('@lid', '');
 
                                 // Usar exatamente o mesmo padrão das boas-vindas
-                                mensagem += `${posicaoEmoji} @${participantId.replace('@c.us', '')}\n`;
-                                mensagem += `   💾 ${megasFormatados} no grupo (${item.compras}x)\n`;
-                                mensagem += `   📊 Total: ${item.megasTotal >= 1024 ? (item.megasTotal/1024).toFixed(1)+'GB' : item.megasTotal+'MB'}\n\n`;
+                                mensagem += `${posicaoEmoji} @${mentionId}\n`;
+                                mensagem += `   💾 ${megasFormatados} no grupo (${item.compras || 0}x)\n`;
+                                mensagem += `   📊 Total: ${(item.megasTotal || 0) >= 1024 ? ((item.megasTotal || 0)/1024).toFixed(1)+'GB' : (item.megasTotal || 0)+'MB'}\n\n`;
 
                                 mentions.push(participantId);
                             } catch (error) {
                                 // Se não conseguir obter o contato, usar apenas o número com padrão das boas-vindas
                                 const posicaoEmoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${item.posicao}º`;
-                                const megasFormatados = item.megas >= 1024 ?
-                                    `${(item.megas/1024).toFixed(1)}GB` : `${item.megas}MB`;
+                                const megasFormatados = (item.megas || 0) >= 1024 ?
+                                    `${((item.megas || 0)/1024).toFixed(1)}GB` : `${item.megas || 0}MB`;
+
+                                // Formatar o ID para menção (remover @c.us ou @lid)
+                                const mentionId = String(participantId).replace('@c.us', '').replace('@lid', '');
 
                                 // Usar exatamente o mesmo padrão das boas-vindas
-                                mensagem += `${posicaoEmoji} @${participantId.replace('@c.us', '')}\n`;
-                                mensagem += `   💾 ${megasFormatados} no grupo (${item.compras}x)\n`;
-                                mensagem += `   📊 Total: ${item.megasTotal >= 1024 ? (item.megasTotal/1024).toFixed(1)+'GB' : item.megasTotal+'MB'}\n\n`;
+                                mensagem += `${posicaoEmoji} @${mentionId}\n`;
+                                mensagem += `   💾 ${megasFormatados} no grupo (${item.compras || 0}x)\n`;
+                                mensagem += `   📊 Total: ${(item.megasTotal || 0) >= 1024 ? ((item.megasTotal || 0)/1024).toFixed(1)+'GB' : (item.megasTotal || 0)+'MB'}\n\n`;
 
                                 mentions.push(participantId);
                             }
                         }
-                        
+
                         mensagem += `🏆 *Total de compradores no grupo: ${ranking.length}*`;
-                        
-                        await client.sendMessage(message.from, mensagem, { mentions: mentions });
+
+                        // Validar e limpar array de mentions (aceitar @lid e @c.us)
+                        const mentionsValidos = mentions.filter(id => {
+                            if (!id || typeof id !== 'string') {
+                                console.log(`⚠️ Mention inválido (não é string):`, id);
+                                return false;
+                            }
+                            // Aceitar @lid e @c.us, mas não IDs genéricos do sistema
+                            if (id.startsWith('SAQUE_BONUS_')) {
+                                console.log(`⚠️ Mention ignorado (sistema):`, id);
+                                return false;
+                            }
+                            if (!id.includes('@lid') && !id.includes('@c.us')) {
+                                console.log(`⚠️ Mention sem @lid ou @c.us:`, id);
+                                return false;
+                            }
+                            return true;
+                        });
+
+                        console.log(`📊 Ranking: ${ranking.length} compradores, ${mentionsValidos.length} mentions válidos`);
+
+                        await client.sendMessage(message.from, mensagem, { mentions: mentionsValidos });
                         return;
                     } catch (error) {
                         console.error('❌ Erro ao obter ranking:', error);
@@ -3443,61 +3320,136 @@ async function processMessage(message) {
                     }
                 }
                 
-                // .inativos - Mostrar compradores inativos (mais de 10 dias sem comprar)
+                // .inativos - Mostrar membros do grupo que NUNCA compraram
                 if (comando === '.inativos') {
                     try {
-                        const inativos = await sistemaCompras.obterInativos();
-                        
-                        if (inativos.length === 0) {
-                            await message.reply(`😴 *COMPRADORES INATIVOS*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n🎉 Todos os compradores estão ativos!\nNinguém está há mais de 10 dias sem comprar.`);
+                        // Obter todos os participantes do grupo
+                        const chat = await message.getChat();
+                        const participantes = chat.participants || [];
+
+                        console.log(`👥 Total de participantes no grupo: ${participantes.length}`);
+
+                        // Obter lista de compradores do grupo
+                        const compradores = await sistemaCompras.obterRankingCompletoGrupo(message.from);
+
+                        // Criar Set com todos os IDs possíveis dos compradores
+                        const compradoresIdsSet = new Set();
+
+                        for (const comprador of compradores) {
+                            const idComprador = comprador.numero;
+                            compradoresIdsSet.add(idComprador);
+
+                            // Tentar obter o contato para descobrir outros IDs
+                            try {
+                                const contact = await client.getContactById(idComprador);
+
+                                // Adicionar o ID principal do contato
+                                if (contact.id && contact.id._serialized) {
+                                    compradoresIdsSet.add(contact.id._serialized);
+                                }
+
+                                // Adicionar número do usuário se disponível
+                                if (contact.id && contact.id.user) {
+                                    compradoresIdsSet.add(`${contact.id.user}@c.us`);
+                                }
+
+                                // Se o ID salvo é @lid, verificar mapeamento
+                                if (idComprador.includes('@lid') && MAPEAMENTO_IDS[idComprador]) {
+                                    compradoresIdsSet.add(MAPEAMENTO_IDS[idComprador]);
+                                }
+                            } catch (error) {
+                                // Continuar mesmo se não conseguir obter o contato
+                                console.log(`⚠️ Não foi possível obter contato para: ${idComprador}`);
+                            }
+                        }
+
+                        console.log(`🛒 Total de compradores: ${compradores.length}`);
+                        console.log(`🛒 Total de IDs únicos (todos os formatos): ${compradoresIdsSet.size}`);
+
+                        // Obter IDs dos participantes
+                        const participantesIds = participantes.map(p => p.id._serialized);
+                        console.log(`👥 Total de participantes: ${participantesIds.length}`);
+
+                        // Filtrar participantes que nunca compraram
+                        const nuncaCompraram = [];
+
+                        for (const participanteId of participantesIds) {
+                            // Verificar se está no Set de compradores
+                            if (compradoresIdsSet.has(participanteId)) {
+                                console.log(`✅ ${participanteId} É COMPRADOR - filtrado`);
+                                continue;
+                            }
+
+                            // Verificar também pelo número base
+                            const numeroBase = participanteId.split('@')[0];
+                            const temNumeroBase = Array.from(compradoresIdsSet).some(id => id.startsWith(numeroBase));
+
+                            if (temNumeroBase) {
+                                console.log(`✅ ${participanteId} (base: ${numeroBase}) É COMPRADOR - filtrado`);
+                                continue;
+                            }
+
+                            // Não é comprador
+                            nuncaCompraram.push(participanteId);
+                        }
+
+                        console.log(`🚫 Membros que nunca compraram: ${nuncaCompraram.length}`);
+
+                        if (nuncaCompraram.length === 0) {
+                            await message.reply(`🎉 *MEMBROS QUE NUNCA COMPRARAM*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n✅ Todos os membros do grupo já fizeram pelo menos uma compra!`);
                             return;
                         }
-                        
-                        let mensagem = `😴 *COMPRADORES INATIVOS*\n━━━━━━━━━━━━━━━━━━━━━━━\n`;
-                        mensagem += `⏰ Mais de 10 dias sem comprar\n\n`;
-                        let mentions = [];
-                        
-                        for (let i = 0; i < Math.min(inativos.length, 20); i++) {
-                            const item = inativos[i];
-                            // COPIAR EXATAMENTE A LÓGICA DAS BOAS-VINDAS - SEM CONVERSÃO
-                            const participantId = item.numero; // Usar número exatamente como está salvo
 
-                            // Obter informações do contato
+                        let mensagem = `🚫 *MEMBROS QUE NUNCA COMPRARAM*\n━━━━━━━━━━━━━━━━━━━━━━━\n`;
+                        mensagem += `📊 Total: ${nuncaCompraram.length} membros\n\n`;
+                        let mentions = [];
+
+                        // Limitar a 50 membros para não sobrecarregar a mensagem
+                        const limite = Math.min(nuncaCompraram.length, 50);
+
+                        for (let i = 0; i < limite; i++) {
+                            const participantId = nuncaCompraram[i];
+
+                            // Validar ID
+                            if (!participantId || participantId.startsWith('SAQUE_BONUS_')) {
+                                continue;
+                            }
+
                             try {
                                 const contact = await client.getContactById(participantId);
-                                
-                                // Prioridade: nome salvo > nome do perfil > número
-                                const nomeExibicao = contact.name || contact.pushname || item.numero;
-                                const numeroLimpo = contact.id.user; // Número sem @ e sem +
-                                
-                                const totalFormatado = item.megasTotal >= 1024 ? 
-                                    `${(item.megasTotal/1024).toFixed(1)}GB` : `${item.megasTotal}MB`;
-                                
-                                mensagem += `👤 @${participantId.replace('@c.us', '')}\n`;
-                                mensagem += `   ⏰ ${item.diasSemComprar} dias sem comprar\n`;
-                                mensagem += `   📊 Total: ${item.totalCompras}x compras (${totalFormatado})\n\n`;
-                                
+                                const nomeExibicao = contact.name || contact.pushname || 'Membro';
+
+                                // Formatar o ID para menção (remover @c.us ou @lid)
+                                const mentionId = String(participantId).replace('@c.us', '').replace('@lid', '');
+
+                                mensagem += `${i + 1}. @${mentionId}\n`;
+
                                 mentions.push(participantId);
                             } catch (error) {
-                                // Se não conseguir obter o contato, usar apenas o número
-                                const totalFormatado = item.megasTotal >= 1024 ? 
-                                    `${(item.megasTotal/1024).toFixed(1)}GB` : `${item.megasTotal}MB`;
-                                
-                                mensagem += `👤 @${participantId.replace('@c.us', '')}\n`;
-                                mensagem += `   ⏰ ${item.diasSemComprar} dias sem comprar\n`;
-                                mensagem += `   📊 Total: ${item.totalCompras}x compras (${totalFormatado})\n\n`;
-                                
+                                // Se não conseguir obter o contato, adicionar mesmo assim
+                                const mentionId = String(participantId).replace('@c.us', '').replace('@lid', '');
+                                mensagem += `${i + 1}. @${mentionId}\n`;
                                 mentions.push(participantId);
                             }
                         }
-                        
-                        if (inativos.length > 20) {
-                            mensagem += `... e mais ${inativos.length - 20} compradores inativos\n\n`;
+
+                        if (nuncaCompraram.length > limite) {
+                            mensagem += `\n... e mais ${nuncaCompraram.length - limite} membros\n`;
                         }
-                        
-                        mensagem += `😴 *Total de inativos: ${inativos.length}*`;
-                        
-                        await client.sendMessage(message.from, mensagem, { mentions: mentions });
+
+                        mensagem += `\n🚫 *Total: ${nuncaCompraram.length} membros que nunca compraram*`;
+
+                        // Validar mentions (aceitar @lid e @c.us)
+                        const mentionsValidos = mentions.filter(id => {
+                            if (!id || typeof id !== 'string') return false;
+                            if (id.startsWith('SAQUE_BONUS_')) return false;
+                            if (!id.includes('@lid') && !id.includes('@c.us')) return false;
+                            return true;
+                        });
+
+                        console.log(`🚫 Inativos: ${nuncaCompraram.length} membros, ${mentionsValidos.length} mentions válidos`);
+
+                        await client.sendMessage(message.from, mensagem, { mentions: mentionsValidos });
                         return;
                     } catch (error) {
                         console.error('❌ Erro ao obter inativos:', error);
@@ -3505,7 +3457,111 @@ async function processMessage(message) {
                         return;
                     }
                 }
-                
+
+                // .detetives - Mostrar membros que NUNCA mandaram mensagem no grupo
+                if (comando === '.detetives') {
+                    try {
+                        // Obter todos os participantes do grupo
+                        const chat = await message.getChat();
+                        const participantes = chat.participants || [];
+
+                        console.log(`👥 Total de participantes no grupo: ${participantes.length}`);
+
+                        // Obter registro de mensagens deste grupo
+                        const registroGrupo = registroMensagens[message.from] || {};
+
+                        console.log(`📝 Membros com mensagens registradas: ${Object.keys(registroGrupo).length}`);
+
+                        // Filtrar participantes que nunca mandaram mensagem
+                        const nuncaMandaram = [];
+
+                        for (const participante of participantes) {
+                            const participanteId = participante.id._serialized;
+
+                            // Verificar se está no registro
+                            if (registroGrupo[participanteId]) {
+                                console.log(`✅ ${participanteId} JÁ MANDOU MENSAGEM - filtrado`);
+                                continue;
+                            }
+
+                            // Verificar também pelo número base (caso o formato seja diferente)
+                            const numeroBase = participanteId.split('@')[0];
+                            const temNumeroBase = Object.keys(registroGrupo).some(id => id.startsWith(numeroBase));
+
+                            if (temNumeroBase) {
+                                console.log(`✅ ${participanteId} (base: ${numeroBase}) JÁ MANDOU MENSAGEM - filtrado`);
+                                continue;
+                            }
+
+                            // Nunca mandou mensagem
+                            nuncaMandaram.push(participanteId);
+                        }
+
+                        console.log(`🕵️ Membros que nunca mandaram mensagem: ${nuncaMandaram.length}`);
+
+                        if (nuncaMandaram.length === 0) {
+                            await message.reply(`🎉 *MEMBROS ESPIÕES*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n✅ Não há espiões! Todos os membros do grupo já mandaram pelo menos uma mensagem!`);
+                            return;
+                        }
+
+                        let mensagem = `🕵️ *MEMBROS ESPIÕES*\n━━━━━━━━━━━━━━━━━━━━━━━\n`;
+                        mensagem += `📊 Total: ${nuncaMandaram.length} membros\n\n`;
+                        let mentions = [];
+
+                        // Limitar a 50 membros para não sobrecarregar a mensagem
+                        const limite = Math.min(nuncaMandaram.length, 50);
+
+                        for (let i = 0; i < limite; i++) {
+                            const participanteId = nuncaMandaram[i];
+
+                            // Validar ID
+                            if (!participanteId || participanteId.startsWith('SAQUE_BONUS_')) {
+                                continue;
+                            }
+
+                            try {
+                                const contact = await client.getContactById(participanteId);
+                                const nomeExibicao = contact.name || contact.pushname || 'Membro';
+
+                                // Formatar o ID para menção (remover @c.us ou @lid)
+                                const mentionId = String(participanteId).replace('@c.us', '').replace('@lid', '');
+
+                                mensagem += `${i + 1}. @${mentionId}\n`;
+
+                                mentions.push(participanteId);
+                            } catch (error) {
+                                // Se não conseguir obter o contato, adicionar mesmo assim
+                                const mentionId = String(participanteId).replace('@c.us', '').replace('@lid', '');
+                                mensagem += `${i + 1}. @${mentionId}\n`;
+                                mentions.push(participanteId);
+                            }
+                        }
+
+                        if (nuncaMandaram.length > limite) {
+                            mensagem += `\n... e mais ${nuncaMandaram.length - limite} espiões\n`;
+                        }
+
+                        mensagem += `\n🕵️ *Total de espiões: ${nuncaMandaram.length}*`;
+
+                        // Validar mentions (aceitar @lid e @c.us)
+                        const mentionsValidos = mentions.filter(id => {
+                            if (!id || typeof id !== 'string') return false;
+                            if (id.startsWith('SAQUE_BONUS_')) return false;
+                            if (!id.includes('@lid') && !id.includes('@c.us')) return false;
+                            return true;
+                        });
+
+                        console.log(`🕵️ Detetives: ${nuncaMandaram.length} membros, ${mentionsValidos.length} mentions válidos`);
+
+                        await client.sendMessage(message.from, mensagem, { mentions: mentionsValidos });
+                        return;
+                    } catch (error) {
+                        console.error('❌ Erro ao obter detetives:', error);
+                        await message.reply(`❌ *ERRO*\n\nNão foi possível obter a lista de detetives.\n\n⚠️ Erro: ${error.message}`);
+                        return;
+                    }
+                }
+
                 // .semcompra - Mostrar usuários que nunca compraram
                 if (comando === '.semcompra') {
                     try {
@@ -4848,13 +4904,14 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                 message.body.startsWith('.clear_') ||
                 message.body.startsWith('.ranking') ||
                 message.body.startsWith('.inativos') ||
+                message.body.startsWith('.detetives') ||
                 message.body.startsWith('.semcompra') ||
                 message.body.startsWith('.resetranking')
             );
 
             // Verificar se é admin executando comando
             const autorModeracaoMsg = message.author || message.from;
-            const isAdminExecutando = await isAdminGrupo(message.from, autorModeracaoMsg) || isAdministrador(autorModeracaoMsg);
+            const isAdminExecutando = isAdministrador(autorModeracaoMsg);
 
             // Pular moderação para comandos administrativos executados por admins
             if (!isComandoAdmin || !isAdminExecutando) {
@@ -5181,8 +5238,26 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
 // Novo handler principal com queue
 client.on('message', async (message) => {
     try {
+        // LOG: Verificar se é administrador enviando mensagem em grupo
+        if (message.from.endsWith('@g.us')) {
+            const autorMensagem = message.author || message.from;
+            if (isAdministrador(autorMensagem)) {
+                const chat = await message.getChat();
+                const nomeGrupo = chat.name || 'Grupo';
+                const contato = await message.getContact();
+                const nomeAdmin = contato.pushname || contato.name || autorMensagem;
+                console.log(`👑 ADMIN DETECTADO: ${nomeAdmin} (${autorMensagem}) enviou mensagem no grupo "${nomeGrupo}"`);
+            }
+        }
+
         // PRIMEIRO: Tentar aprender mapeamentos LID automaticamente
         await aprenderMapeamento(message);
+
+        // Registrar primeira mensagem do membro no grupo (se for grupo)
+        if (message.from.endsWith('@g.us') && !message.fromMe) {
+            const autorMensagem = message.author || message.from;
+            registrarPrimeiraMensagem(message.from, autorMensagem);
+        }
 
         // Segundo: tentar processar comandos administrativos rápidos
         const adminProcessed = await handleAdminCommands(message);

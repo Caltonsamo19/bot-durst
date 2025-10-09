@@ -555,14 +555,19 @@ Se não conseguires extrair os dados:
     // Remove espaços, hífens, pontos e + do número
     let numeroLimpo = numeroString.replace(/[\s\-\.+]/g, '');
 
-    // Remove código de país 258 se presente
-    if (numeroLimpo.startsWith('258')) {
-      numeroLimpo = numeroLimpo.substring(3);
-    }
+    // Remove código de país 258 se presente (em qualquer posição no início)
+    // Suporta formatos como: 258852118624, 258 852 118 624, +258852118624
+    numeroLimpo = numeroLimpo.replace(/^258/, '');
 
     // Retorna apenas se for um número válido de 9 dígitos começando com 8
     if (/^8[0-9]{8}$/.test(numeroLimpo)) {
       return numeroLimpo;
+    }
+
+    // Se não conseguiu normalizar, tentar extrair apenas os 9 últimos dígitos se começar com 8
+    const match = numeroLimpo.match(/8[0-9]{8}/);
+    if (match) {
+      return match[0];
     }
 
     return null;
@@ -591,6 +596,7 @@ Se não conseguires extrair os dados:
     // 3. Números com 258: 25852118624 ou 258 85 211 8624
     // 4. Números normais: 852118624
     const padroes = [
+      /(?:\+?\s*258\s*)?8\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]/g,  // 258 8 5 2 1 1 8 6 2 4 ou 8 5 2 1 1 8 6 2 4
       /\+?\s*258\s*8[0-9]\s*[0-9]{3}\s*[0-9]{4}/g,           // +258 85 211 8624 (com espaços variados)
       /(?<!\d)\+?258\s*8[0-9]{8}(?!\d)/g,                    // +258852118624 ou 258852118624 (junto)
       /\b8[0-9]\s*[0-9]{3}\s*[0-9]{4}\b/g,                   // 85 211 8624 (com espaços variados)
@@ -725,6 +731,7 @@ Se não conseguires extrair os dados:
     // 3. Números com 258: 25852118624 ou 258 85 211 8624
     // 4. Números normais: 852118624
     const padroes = [
+      /(?:\+?\s*258\s*)?8\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]/g,  // 258 8 5 2 1 1 8 6 2 4 ou 8 5 2 1 1 8 6 2 4
       /\+?\s*258\s*8[0-9]\s*[0-9]{3}\s*[0-9]{4}/g,           // +258 85 211 8624 (com espaços variados)
       /(?<!\d)\+?258\s*8[0-9]{8}(?!\d)/g,                    // +258852118624 ou 258852118624 (junto)
       /\b8[0-9]\s*[0-9]{3}\s*[0-9]{4}\b/g,                   // 85 211 8624 (com espaços variados)
@@ -1020,12 +1027,12 @@ Se não conseguires extrair os dados:
     
     // Padrões melhorados para pedidos específicos (com suporte a números espaçados)
     const padroesPedidos = [
-      // Formato: quantidade + unidade + número (com ou sem espaços no número)
-      /(\d+(?:\.\d+)?)\s*(gb|g|giga|gigas?|mb|m|mega|megas?)\s+(?:\+?\s*258\s*)?([8][0-9]\s*[0-9]{3}\s*[0-9]{4}|[8][0-9]{8})/gi,
-      // Formato: número + quantidade + unidade (com ou sem espaços no número)
-      /(?:\+?\s*258\s*)?([8][0-9]\s*[0-9]{3}\s*[0-9]{4}|[8][0-9]{8})\s+(\d+(?:\.\d+)?)\s*(gb|g|giga|gigas?|mb|m|mega|megas?)/gi,
-      // Formato com "para": 2gb para 852413946 ou 85 211 8624
-      /(\d+(?:\.\d+)?)\s*(gb|g|giga|gigas?|mb|m|mega|megas?)\s+(?:para\s+)?(?:\+?\s*258\s*)?([8][0-9]\s*[0-9]{3}\s*[0-9]{4}|[8][0-9]{8})/gi
+      // Formato: quantidade + unidade + número (com ou sem espaços no número, incluindo 258)
+      /(\d+(?:\.\d+)?)\s*(gb|g|giga|gigas?|mb|m|mega|megas?)\s+(?:\+?\s*258\s*)?(?:8\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]|8[0-9]\s*[0-9]{3}\s*[0-9]{4}|8[0-9]{8})/gi,
+      // Formato: número + quantidade + unidade (com ou sem espaços no número, incluindo 258)
+      /(?:\+?\s*258\s*)?(?:8\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]|8[0-9]\s*[0-9]{3}\s*[0-9]{4}|8[0-9]{8})\s+(\d+(?:\.\d+)?)\s*(gb|g|giga|gigas?|mb|m|mega|megas?)/gi,
+      // Formato com "para": 2gb para 852413946 ou 85 211 8624 ou 258 8 5 2...
+      /(\d+(?:\.\d+)?)\s*(gb|g|giga|gigas?|mb|m|mega|megas?)\s+(?:para\s+)?(?:\+?\s*258\s*)?(?:8\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]|8[0-9]\s*[0-9]{3}\s*[0-9]{4}|8[0-9]{8})/gi
     ];
     
     const pedidos = [];
