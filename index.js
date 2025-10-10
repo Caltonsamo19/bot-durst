@@ -2,8 +2,155 @@ require('dotenv').config();
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs').promises;
+const fssync = require('fs');
 const path = require('path');
 const axios = require('axios'); // npm install axios
+const { spawn } = require('child_process');
+
+// === LIMPEZA AUTOMÁTICA DE CACHE ===
+const CACHE_DIR = path.join(__dirname, '.wwebjs_cache');
+const CACHE_CLEANUP_INTERVAL = 12 * 60 * 60 * 1000; // 12 horas em milissegundos
+const HORARIOS_FIXOS = [18, 20]; // Horários fixos para limpeza (18h e 20h)
+const ARQUIVO_REINICIO = path.join(__dirname, '.reinicio_status.json');
+let ultimaLimpeza = new Date();
+let clienteGlobal = null; // Referência ao cliente para enviar notificações
+
+// Função para enviar notificação em todos os grupos
+async function notificarGrupos(mensagem) {
+    try {
+        if (!clienteGlobal) {
+            console.log('⚠️ Cliente não disponível para notificações');
+            return;
+        }
+
+        // Importar CONFIGURACAO_GRUPOS dinamicamente ou usar a variável global
+        const chats = await clienteGlobal.getChats();
+        const grupos = chats.filter(chat => chat.isGroup);
+
+        for (const grupo of grupos) {
+            try {
+                await grupo.sendMessage(mensagem);
+                console.log(`✅ Notificação enviada para: ${grupo.name}`);
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Delay entre mensagens
+            } catch (error) {
+                console.error(`❌ Erro ao notificar grupo ${grupo.name}:`, error.message);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Erro ao notificar grupos:', error.message);
+    }
+}
+
+// Função para reiniciar o bot
+function reiniciarBot() {
+    console.log('🔄 Reiniciando bot...');
+
+    const child = spawn(process.argv[0], process.argv.slice(1), {
+        detached: true,
+        stdio: 'inherit'
+    });
+
+    child.unref();
+    process.exit(0);
+}
+
+// Função de limpeza com reinício automático
+async function limparCacheWhatsApp(motivo = 'intervalo') {
+    try {
+        console.log(`🧹 Iniciando limpeza da cache do WhatsApp (${motivo})...`);
+
+        // Notificar grupos antes de reiniciar
+        const horaAtual = new Date().toLocaleTimeString('pt-BR');
+        await notificarGrupos(`⚠️ *AVISO DE MANUTENÇÃO*\n\n🔧 O bot será reiniciado para manutenção preventiva\n⏱️ Horário: ${horaAtual}\n🎯 Objetivo: Manter o sistema rápido e saudável\n⏳ Tempo estimado: 1-2 minutos\n\n_Aguarde alguns instantes..._`);
+
+        // Aguardar 3 segundos para garantir que as mensagens foram enviadas
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // Verifica se a pasta existe
+        if (fssync.existsSync(CACHE_DIR)) {
+            await fs.rm(CACHE_DIR, { recursive: true, force: true });
+            console.log('✅ Cache limpa com sucesso!');
+            ultimaLimpeza = new Date();
+            console.log(`⏰ Última limpeza: ${ultimaLimpeza.toLocaleString('pt-BR')}`);
+        } else {
+            console.log('ℹ️ Pasta de cache não encontrada, pulando limpeza');
+        }
+
+        // Salvar flag de reinício para notificar após o restart
+        await fs.writeFile(ARQUIVO_REINICIO, JSON.stringify({
+            reiniciado: true,
+            motivoLimpeza: motivo,
+            horaLimpeza: new Date().toISOString()
+        }));
+
+        // Aguardar mais 2 segundos antes de reiniciar
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Reiniciar o bot
+        reiniciarBot();
+
+    } catch (error) {
+        console.error('❌ Erro ao limpar cache:', error.message);
+    }
+}
+
+// Verificar se o bot foi reiniciado e notificar
+async function verificarReinicio() {
+    try {
+        if (fssync.existsSync(ARQUIVO_REINICIO)) {
+            const dados = JSON.parse(await fs.readFile(ARQUIVO_REINICIO, 'utf-8'));
+
+            if (dados.reiniciado) {
+                console.log('✅ Bot reiniciado com sucesso após limpeza de cache');
+
+                // Aguardar 5 segundos para garantir que o WhatsApp está conectado
+                await new Promise(resolve => setTimeout(resolve, 5000));
+
+                const horaAtual = new Date().toLocaleTimeString('pt-BR');
+                await notificarGrupos(`✅ *BOT ONLINE*\n\n🎉 Manutenção concluída com sucesso!\n⏰ Horário: ${horaAtual}\n💚 Sistema otimizado e funcionando normalmente\n\n_Todos os serviços estão operacionais!_`);
+
+                // Remover arquivo de status
+                await fs.unlink(ARQUIVO_REINICIO);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Erro ao verificar reinício:', error.message);
+    }
+}
+
+// Verificar se deve limpar nos horários fixos
+function verificarHorarioFixo() {
+    const agora = new Date();
+    const horaAtual = agora.getHours();
+    const minutoAtual = agora.getMinutes();
+
+    // Verifica se está em um horário fixo e se já não limpou nesta hora
+    if (HORARIOS_FIXOS.includes(horaAtual) && minutoAtual === 0) {
+        const ultimaHora = ultimaLimpeza.getHours();
+        const ultimaData = ultimaLimpeza.toDateString();
+        const dataAtual = agora.toDateString();
+
+        // Só limpa se não limpou nesta hora hoje
+        if (!(ultimaHora === horaAtual && ultimaData === dataAtual)) {
+            limparCacheWhatsApp(`horário fixo ${horaAtual}h`);
+        }
+    }
+}
+
+// Agendar limpeza automática
+function iniciarLimpezaAutomatica() {
+    console.log('⚙️ Limpeza automática de cache ativada:');
+    console.log('   - Intervalo: a cada 12 horas');
+    console.log('   - Horários fixos: 18:00 e 20:00');
+
+    // Limpeza a cada 12 horas
+    setInterval(() => {
+        limparCacheWhatsApp('intervalo 12h');
+    }, CACHE_CLEANUP_INTERVAL);
+
+    // Verificar horários fixos a cada minuto
+    setInterval(verificarHorarioFixo, 60 * 1000);
+}
 
 // === AXIOS SIMPLIFICADO (SEGUINDO PADRÃO BOT1) ===
 const axiosInstance = axios.create({
@@ -149,12 +296,8 @@ const ia = new WhatsAppAI(process.env.OPENAI_API_KEY);
 let sistemaPacotes = null;
 let sistemaCompras = null;
 
-// Configuração para encaminhamento
-const ENCAMINHAMENTO_CONFIG = {
-    grupoOrigem: '120363152151047451@g.us', // Phull Megas
-    numeroDestino: '258861645968@c.us',
-    intervaloSegundos: 2
-};
+// REMOVIDO: Sistema de encaminhamento de mensagens
+// (Movido para outro bot)
 
 // === SISTEMA DE FILA ASSÍNCRONA DE MENSAGENS ===
 class MessageQueue {
@@ -226,9 +369,7 @@ class MessageQueue {
 
 const messageQueue = new MessageQueue();
 
-// Fila de mensagens para encaminhar (mantida para compatibilidade)
-let filaMensagens = [];
-let processandoFila = false;
+// REMOVIDO: Fila de mensagens (sistema movido para outro bot)
 
 // === SISTEMA DE CACHE DE DADOS OTIMIZADO COM CLEANUP AUTOMÁTICO ===
 // === CACHE DE TRANSAÇÕES SIMPLIFICADO (SEGUINDO PADRÃO BOT1) ===
@@ -693,6 +834,19 @@ async function criarReferenciaAutomaticaInteligente(convidadorId, convidadoId, g
         // Gerar código único
         const codigo = gerarCodigoReferencia(convidadorId);
 
+        // CORRIGIDO: Registrar código ANTES da referência do cliente (ESTRUTURA PADRONIZADA)
+        codigosReferencia[codigo] = {
+            dono: convidadorId, // CORRIGIDO: usar 'dono' em vez de salvar só o ID
+            nome: nomeConvidador,
+            criado: new Date().toISOString(),
+            ativo: true,
+            usado: true,
+            usadoPor: convidadoId,
+            dataUso: new Date().toISOString(),
+            automatico: true,
+            metodoDeteccao: 'AUTO_INTELIGENTE'
+        };
+
         // Criar referência com indicação de detecção automática
         referenciasClientes[convidadoId] = {
             codigo: codigo,
@@ -707,9 +861,20 @@ async function criarReferenciaAutomaticaInteligente(convidadorId, convidadoId, g
             obs: 'Referência criada por detecção automática inteligente'
         };
 
-        codigosReferencia[codigo] = convidadoId;
-
         console.log(`   ✅ INTELIGENTE: Referência criada: ${codigo} (${nomeConvidador} → ${nomeConvidado})`);
+
+        // CORRIGIDO: Inicializar saldo de bônus do convidador
+        if (!bonusSaldos[convidadorId]) {
+            bonusSaldos[convidadorId] = {
+                saldo: 0,
+                detalhesReferencias: {},
+                historicoSaques: [],
+                totalReferencias: 0
+            };
+        }
+
+        // Salvar dados
+        agendarSalvamento();
 
         // Enviar notificação ao convidador com indicação de auto-detecção
         try {
@@ -722,7 +887,7 @@ async function criarReferenciaAutomaticaInteligente(convidadorId, convidadoId, g
 ⚠️ *Esta referência foi criada automaticamente*
 Se não foi você quem convidou este membro, digite *.cancelar ${codigo}* para cancelar.
 
-💰 Ganhe 10MB por cada 100MT que ele gastar!`;
+💰 Ganhe 200MB a cada compra deles (até 5 compras = 1GB)!`;
 
             await client.sendMessage(convidadorId, mensagemNotificacao);
             console.log(`   ✅ INTELIGENTE: Notificação enviada ao convidador`);
@@ -758,10 +923,12 @@ async function criarReferenciaAutomaticaBackup(convidadorId, convidadoId, grupoI
         // Gerar código único para esta referência
         const codigo = gerarCodigoReferencia(convidadorId);
 
-        // Registrar código de referência
+        // Registrar código de referência (ESTRUTURA PADRONIZADA)
         codigosReferencia[codigo] = {
-            criador: convidadorId,
-            dataCreacao: new Date().toISOString(),
+            dono: convidadorId, // CORRIGIDO: usar 'dono' em vez de 'criador'
+            nome: 'AutoBackup', // Nome simplificado para referências backup
+            criado: new Date().toISOString(),
+            ativo: true,
             usado: true,
             usadoPor: convidadoId,
             dataUso: new Date().toISOString(),
@@ -802,8 +969,8 @@ async function criarReferenciaAutomaticaBackup(convidadorId, convidadoId, grupoI
             backup: true
         };
 
-        // Salvar dados
-        // Sistema de cache otimizado - sem salvamento em arquivos
+        // CORRIGIDO: Salvar dados (reativar salvamento para persistir referências)
+        agendarSalvamento();
 
         // Obter nomes dos participantes para notificação
         const nomeConvidador = await obterNomeContato(convidadorId);
@@ -811,11 +978,15 @@ async function criarReferenciaAutomaticaBackup(convidadorId, convidadoId, grupoI
 
         // Enviar notificação no grupo (com indicação de estimativa)
         try {
+            // CORRIGIDO: Remover @lid e @c.us das menções
+            const convidadorLimpo = convidadorId.replace('@c.us', '').replace('@lid', '');
+            const convidadoLimpo = convidadoId.replace('@c.us', '').replace('@lid', '');
+
             await client.sendMessage(grupoId,
                 `🎉 *NOVO MEMBRO ADICIONADO!*\n\n` +
-                `👋 Bem-vindo @${convidadoId.replace('@c.us', '')}!\n\n` +
-                `📢 Sistema detectou provável adição por: @${convidadorId.replace('@c.us', '')}\n` +
-                `🎁 @${convidadorId.replace('@c.us', '')} ganhará *200MB* a cada compra de @${convidadoId.replace('@c.us', '')}!\n\n` +
+                `👋 Bem-vindo @${convidadoLimpo}!\n\n` +
+                `📢 Sistema detectou provável adição por: @${convidadorLimpo}\n` +
+                `🎁 @${convidadorLimpo} ganhará *200MB* a cada compra de @${convidadoLimpo}!\n\n` +
                 `📋 *Benefícios:*\n` +
                 `• Máximo: 5 compras = 1000MB (1GB)\n` +
                 `• Saque mínimo: 1000MB\n` +
@@ -881,24 +1052,34 @@ async function salvarDadosMembros() {
 // Verificar se usuário é elegível para usar código (últimos 5 dias)
 function isElegivelParaCodigo(participantId, grupoId) {
     try {
+        // CORRIGIDO: Se não tem registro, ASSUMIR que é novo membro (elegível)
         if (!membrosEntrada[grupoId] || !membrosEntrada[grupoId][participantId]) {
-            console.log(`⚠️ Membro sem registro de entrada`);
-            return false; // Se não tem registro, não é elegível
+            console.log(`✅ Membro sem registro de entrada - ASSUMINDO NOVO MEMBRO (elegível)`);
+
+            // Registrar automaticamente agora
+            if (!membrosEntrada[grupoId]) {
+                membrosEntrada[grupoId] = {};
+            }
+            membrosEntrada[grupoId][participantId] = new Date().toISOString();
+
+            return true; // CORRIGIDO: Novo membro É elegível
         }
-        
+
         const dataEntrada = new Date(membrosEntrada[grupoId][participantId]);
         const agora = new Date();
         const limite5Dias = 5 * 24 * 60 * 60 * 1000; // 5 dias em ms
-        
+
         const tempoNoGrupo = agora - dataEntrada;
+        const diasNoGrupo = Math.floor(tempoNoGrupo / (24 * 60 * 60 * 1000));
         const elegivelTempo = tempoNoGrupo <= limite5Dias;
-        
-        console.log(`🔍 Verificando elegibilidade - ${Math.floor(tempoNoGrupo / (24 * 60 * 60 * 1000))} dias no grupo`);
-        
+
+        console.log(`🔍 Verificando elegibilidade - ${diasNoGrupo} dias no grupo - ${elegivelTempo ? 'ELEGÍVEL' : 'NÃO ELEGÍVEL'}`);
+
         return elegivelTempo;
     } catch (error) {
         console.error('❌ Erro ao verificar elegibilidade:', error);
-        return false;
+        // CORRIGIDO: Em caso de erro, permitir (dar benefício da dúvida)
+        return true;
     }
 }
 
@@ -910,7 +1091,16 @@ async function carregarDadosReferencia() {
             const dados = await fs.readFile(ARQUIVO_CODIGOS, 'utf8');
             codigosReferencia = JSON.parse(dados);
             console.log(`📋 ${Object.keys(codigosReferencia).length} códigos de referência carregados`);
+
+            // LOGS DETALHADOS para debug
+            if (Object.keys(codigosReferencia).length > 0) {
+                console.log(`🔍 Códigos carregados:`);
+                Object.entries(codigosReferencia).forEach(([codigo, dados]) => {
+                    console.log(`   - ${codigo} → Dono: ${dados.dono} (${dados.nome})`);
+                });
+            }
         } catch (e) {
+            console.log(`⚠️ Arquivo de códigos não encontrado, criando novo: ${e.message}`);
             codigosReferencia = {};
         }
 
@@ -1226,11 +1416,15 @@ async function processarBonusCompra(remetenteCompra, valorCompra) {
         const isAutomatico = referencia.automatico;
         const tipoReferencia = isAutomatico ? 'adicionou ao grupo' : `usou seu código ${referencia.codigo}`;
 
+        // CORRIGIDO: Remover @lid e @c.us das menções
+        const convidadorLimpo = convidador.replace('@c.us', '').replace('@lid', '');
+        const remetenteCompraLimpo = remetenteCompra.replace('@c.us', '').replace('@lid', '');
+
         await client.sendMessage(message.from,
             `🎉 *BÔNUS DE REFERÊNCIA CREDITADO!*\n\n` +
-            `💎 @${convidador.replace('@c.us', '')}, recebeste *${bonusAtual}MB* de bônus!\n\n` +
-            `👤 *Referenciado:* @${remetenteCompra.replace('@c.us', '')}\n` +
-            `📢 *Motivo:* @${remetenteCompra.replace('@c.us', '')} que você ${tipoReferencia} fez uma compra!\n` +
+            `💎 @${convidadorLimpo}, recebeste *${bonusAtual}MB* de bônus!\n\n` +
+            `👤 *Referenciado:* @${remetenteCompraLimpo}\n` +
+            `📢 *Motivo:* @${remetenteCompraLimpo} que você ${tipoReferencia} fez uma compra!\n` +
             `🛒 *Compra:* ${referencia.comprasRealizadas}ª de 5\n` +
             `💰 *Novo saldo:* ${novoSaldoFormatado}\n\n` +
             `${novoSaldo >= 1024 ? '🚀 *Já podes sacar!* Use: *.sacar*' : '⏳ *Continua a convidar amigos para ganhar mais bônus!*'}`, {
@@ -1274,10 +1468,12 @@ async function criarReferenciaAutomatica(convidadorId, convidadoId, grupoId) {
         // Gerar código único para esta referência (para compatibilidade com sistema antigo)
         const codigo = gerarCodigoReferencia(convidadorId);
 
-        // Registrar código de referência
+        // Registrar código de referência (ESTRUTURA PADRONIZADA)
         codigosReferencia[codigo] = {
-            criador: convidadorId,
-            dataCreacao: new Date().toISOString(),
+            dono: convidadorId, // CORRIGIDO: usar 'dono' em vez de 'criador'
+            nome: 'Auto', // Nome simplificado para referências automáticas
+            criado: new Date().toISOString(),
+            ativo: true,
             usado: true,
             usadoPor: convidadoId,
             dataUso: new Date().toISOString(),
@@ -1315,8 +1511,8 @@ async function criarReferenciaAutomatica(convidadorId, convidadoId, grupoId) {
             automatico: true
         };
 
-        // Salvar dados
-        // Sistema de cache otimizado - sem salvamento em arquivos
+        // CORRIGIDO: Salvar dados (reativar salvamento para persistir referências)
+        agendarSalvamento();
 
         // Obter nomes dos participantes para notificação
         const nomeConvidador = await obterNomeContato(convidadorId);
@@ -1324,11 +1520,15 @@ async function criarReferenciaAutomatica(convidadorId, convidadoId, grupoId) {
 
         // Enviar notificação no grupo
         try {
+            // CORRIGIDO: Remover @lid e @c.us das menções
+            const convidadorLimpo = convidadorId.replace('@c.us', '').replace('@lid', '');
+            const convidadoLimpo = convidadoId.replace('@c.us', '').replace('@lid', '');
+
             await client.sendMessage(grupoId,
                 `🎉 *NOVO MEMBRO ADICIONADO!*\n\n` +
-                `👋 Bem-vindo @${convidadoId.replace('@c.us', '')}!\n\n` +
-                `📢 Adicionado por: @${convidadorId.replace('@c.us', '')}\n` +
-                `🎁 @${convidadorId.replace('@c.us', '')} ganhará *200MB* a cada compra de @${convidadoId.replace('@c.us', '')}!\n\n` +
+                `👋 Bem-vindo @${convidadoLimpo}!\n\n` +
+                `📢 Adicionado por: @${convidadorLimpo}\n` +
+                `🎁 @${convidadorLimpo} ganhará *200MB* a cada compra de @${convidadoLimpo}!\n\n` +
                 `📋 *Benefícios:*\n` +
                 `• Máximo: 5 compras = 1000MB (1GB)\n` +
                 `• Saque mínimo: 1000MB\n` +
@@ -1673,11 +1873,7 @@ async function processarPagamentoConfirmado(pendencia) {
         // Registrar comprador
         await registrarComprador(chatId, numero, messageData.notifyName, megas);
 
-        // Encaminhamento se necessário
-        if (chatId === ENCAMINHAMENTO_CONFIG.grupoOrigem) {
-            const timestampMensagem = new Date().toLocaleString('pt-BR');
-            adicionarNaFila(dadosCompletos, messageData.author, 'Retry Confirmado', timestampMensagem);
-        }
+        // REMOVIDO: Encaminhamento de mensagens (sistema movido para outro bot)
 
         console.log(`✅ RETRY: Pagamento ${pendencia.referencia} processado com sucesso`);
 
@@ -1693,70 +1889,9 @@ let gruposLogados = new Set();
 let comandosCustomizados = {};
 const ARQUIVO_COMANDOS = 'comandos_customizados.json';
 
-// === SISTEMA DE REGISTRO DE MENSAGENS ===
-let registroMensagens = {}; // { grupoId: { memberId: timestamp } }
-const ARQUIVO_REGISTRO_MENSAGENS = path.join(__dirname, 'registro_mensagens.json');
+// REMOVIDO: Sistema de registro de mensagens (movido para outro bot)
 
-// Carregar registro de mensagens
-async function carregarRegistroMensagens() {
-    try {
-        if (fs.existsSync(ARQUIVO_REGISTRO_MENSAGENS)) {
-            const data = await fs.readFile(ARQUIVO_REGISTRO_MENSAGENS, 'utf8');
-            registroMensagens = JSON.parse(data);
-            const totalGrupos = Object.keys(registroMensagens).length;
-            const totalMembros = Object.values(registroMensagens).reduce((sum, grupo) => sum + Object.keys(grupo).length, 0);
-            console.log(`📝 Registro de mensagens carregado: ${totalGrupos} grupos, ${totalMembros} membros`);
-        } else {
-            console.log(`📝 Nenhum registro de mensagens encontrado, iniciando novo`);
-            registroMensagens = {};
-        }
-    } catch (error) {
-        console.error('❌ Erro ao carregar registro de mensagens:', error.message);
-        registroMensagens = {};
-    }
-}
-
-// Salvar registro de mensagens (debounced para não salvar muito frequentemente)
-let salvarRegistroTimeout = null;
-async function salvarRegistroMensagens() {
-    // Cancelar salvamento pendente
-    if (salvarRegistroTimeout) {
-        clearTimeout(salvarRegistroTimeout);
-    }
-
-    // Agendar salvamento para daqui 30 segundos
-    salvarRegistroTimeout = setTimeout(async () => {
-        try {
-            await fs.writeFile(ARQUIVO_REGISTRO_MENSAGENS, JSON.stringify(registroMensagens, null, 2));
-            console.log(`💾 Registro de mensagens salvo`);
-        } catch (error) {
-            console.error('❌ Erro ao salvar registro de mensagens:', error.message);
-        }
-    }, 30000); // 30 segundos
-}
-
-// Registrar primeira mensagem de um membro (se ainda não foi registrada)
-function registrarPrimeiraMensagem(grupoId, membroId) {
-    if (!grupoId || !membroId) return false;
-
-    // Inicializar grupo se não existir
-    if (!registroMensagens[grupoId]) {
-        registroMensagens[grupoId] = {};
-    }
-
-    // Se já registrou, não fazer nada
-    if (registroMensagens[grupoId][membroId]) {
-        return false;
-    }
-
-    // Registrar primeira mensagem
-    registroMensagens[grupoId][membroId] = new Date().toISOString();
-
-    // Agendar salvamento
-    salvarRegistroMensagens();
-
-    return true; // Indica que foi primeira mensagem
-}
+// REMOVIDO: Função registrarPrimeiraMensagem (sistema movido para outro bot)
 
 // Configuração de administradores GLOBAIS
 const ADMINISTRADORES_GLOBAIS = [
@@ -1771,17 +1906,22 @@ const ADMINISTRADORES_GLOBAIS = [
     '203109674577958@lid',
     '23450974470333@lid',   // ID interno do WhatsApp para 852118624
     // Novos administradores adicionados:
-    '258850401416@c.us',    // +258 85 040 1416
-    '258874100607@c.us',    // +258 87 410 0607 (já existia)
-    '258858891101@c.us',    // +258 85 889 1101
-    '258865627840@c.us'     // +258 86 562 7840
+    '258850401416@c.us',    // +258 85 040 1416 - Kelven Junior
+    '216054655656152@lid',  // @lid do Kelven Junior
+    '258858891101@c.us',    // +258 85 889 1101 - Isaac
+    '85307059867830@lid',   // @lid do Isaac
+    '258865627840@c.us',    // +258 86 562 7840 - Ercílio
+    '170725386272876@lid'   // @lid do Ercílio
 ];
 
 // Mapeamento de IDs internos (@lid) para números reais (@c.us) - SISTEMA DINÂMICO
 let MAPEAMENTO_IDS = {
     '23450974470333@lid': '258852118624@c.us',  // Seu ID
     '245075749638206@lid': null,  // Será identificado automaticamente
-    '76991768342659@lid': '258870818180@c.us'  // Joãozinho - corrigido manualmente
+    '76991768342659@lid': '258870818180@c.us',  // Joãozinho - corrigido manualmente
+    '216054655656152@lid': '258850401416@c.us', // Kelven Junior
+    '85307059867830@lid': '258858891101@c.us',  // Isaac
+    '170725386272876@lid': '258865627840@c.us'  // Ercílio
 };
 
 // === SISTEMA AUTOMÁTICO DE MAPEAMENTO LID ===
@@ -2147,11 +2287,10 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
             message: resultado.message
         };
     } else {
-        // Fallback para WhatsApp se Google Sheets falhar
-        console.log(`🔄 [${grupoNome}] Google Sheets falhou, usando WhatsApp backup...`);
-        enviarViaWhatsAppTasker(linhaCompleta, grupoNome, autorMensagem);
+        // REMOVIDO: Fallback WhatsApp (sistema movido para outro bot)
+        console.log(`❌ [${grupoNome}] Google Sheets falhou - sem fallback disponível`);
         if (cacheTransacoes.has(transacaoKey)) {
-            cacheTransacoes.get(transacaoKey).metodo = 'whatsapp_backup';
+            cacheTransacoes.get(transacaoKey).metodo = 'falhou';
         }
     }
     
@@ -2163,23 +2302,8 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
     return linhaCompleta;
 }
 
-function enviarViaWhatsAppTasker(linhaCompleta, grupoNome, autorMensagem) {
-    const item = {
-        conteudo: linhaCompleta, // Apenas: referencia|valor|numero
-        autor: autorMensagem,
-        grupo: grupoNome,
-        timestamp: Date.now(),
-        id: Date.now() + Math.random(),
-        tipo: 'tasker_data_backup'
-    };
-
-    filaMensagens.push(item);
-    console.log(`📱 WhatsApp Backup → Tasker: ${linhaCompleta}`);
-
-    if (!processandoFila) {
-        processarFila();
-    }
-}
+// REMOVIDO: Função enviarViaWhatsAppTasker
+// (Sistema de encaminhamento movido para outro bot)
 
 // === FUNÇÃO REMOVIDA PARA OTIMIZAÇÃO ===
 // Não salva mais arquivos .txt desnecessários
@@ -2630,52 +2754,8 @@ async function registrarComprador(grupoId, numeroComprador, nomeContato, valorTr
 
 // === FILA DE MENSAGENS ===
 
-function adicionarNaFila(mensagem, autor, nomeGrupo, timestamp) {
-    const item = {
-        conteudo: mensagem,
-        autor: autor,
-        grupo: nomeGrupo,
-        timestamp: timestamp,
-        id: Date.now() + Math.random()
-    };
-
-    filaMensagens.push(item);
-    console.log(`📥 Adicionado à fila: ${filaMensagens.length} mensagens`);
-
-    if (!processandoFila) {
-        processarFila();
-    }
-}
-
-async function processarFila() {
-    if (processandoFila || filaMensagens.length === 0) {
-        return;
-    }
-
-    processandoFila = true;
-    console.log(`🚀 Processando ${filaMensagens.length} mensagens...`);
-
-    while (filaMensagens.length > 0) {
-        const item = filaMensagens.shift();
-
-        try {
-            await client.sendMessage(ENCAMINHAMENTO_CONFIG.numeroDestino, item.conteudo);
-            console.log(`✅ Encaminhado: ${item.conteudo.substring(0, 50)}...`);
-
-            if (filaMensagens.length > 0) {
-                await new Promise(resolve => setTimeout(resolve, ENCAMINHAMENTO_CONFIG.intervaloSegundos * 1000));
-            }
-
-        } catch (error) {
-            console.error(`❌ Erro ao encaminhar:`, error);
-            filaMensagens.unshift(item);
-            await new Promise(resolve => setTimeout(resolve, 10000));
-        }
-    }
-
-    processandoFila = false;
-    console.log(`🎉 Fila processada!`);
-}
+// REMOVIDO: Funções de processamento de fila de encaminhamento
+// (Sistema movido para outro bot)
 
 // === EVENTOS DO BOT ===
 
@@ -2703,25 +2783,33 @@ client.on('ready', async () => {
     console.log(`🔗 URL: ${GOOGLE_SHEETS_CONFIG.scriptUrl}`);
     console.log('🤖 Bot Retalho - Lógica simples igual ao Bot Atacado!');
 
+    // Configurar cliente global para notificações
+    clienteGlobal = client;
+
+    // Verificar se o bot acabou de ser reiniciado e notificar grupos
+    await verificarReinicio();
+
+    // Iniciar limpeza automática de cache
+    iniciarLimpezaAutomatica();
+
     // Carregar mapeamentos LID salvos
     await carregarMapeamentos();
 
-    // Carregar registro de mensagens
-    await carregarRegistroMensagens();
+    // REMOVIDO: Carregamento de registro de mensagens (sistema movido para outro bot)
 
     // === INICIALIZAR SISTEMA DE RELATÓRIOS ===
     try {
         global.sistemaRelatorios = new SistemaRelatorios(client, GOOGLE_SHEETS_CONFIG, PAGAMENTOS_CONFIG);
 
-        // Configurar números de relatório (AJUSTAR CONFORME NECESSÁRIO)
-        // sistemaRelatorios.configurarNumeroRelatorio('GRUPO_ID_AQUI', '258847123456');
+        // Carregar configurações salvas
+        await global.sistemaRelatorios.carregarConfiguracoes();
 
         // Iniciar agendamento às 22h
         global.sistemaRelatorios.iniciarAgendamento();
 
         console.log('📊 Sistema de relatórios iniciado!');
         console.log('⏰ Relatórios agendados para 22:00 diariamente');
-        console.log('📞 Configure números com: !config-relatorio');
+        console.log('📞 Comandos: .config-relatorio .list-relatorios .remove-relatorio .test-relatorio');
 
     } catch (error) {
         console.error('❌ Erro ao iniciar sistema de relatórios:', error.message);
@@ -3467,35 +3555,17 @@ async function processMessage(message) {
 
                         console.log(`👥 Total de participantes no grupo: ${participantes.length}`);
 
-                        // Obter registro de mensagens deste grupo
-                        const registroGrupo = registroMensagens[message.from] || {};
-
-                        console.log(`📝 Membros com mensagens registradas: ${Object.keys(registroGrupo).length}`);
+                        // REMOVIDO: Sistema de registro de mensagens (movido para outro bot)
 
                         // Filtrar participantes que nunca mandaram mensagem
+                        // NOTA: Agora retorna todos os participantes (sem filtro de mensagens)
                         const nuncaMandaram = [];
 
-                        for (const participante of participantes) {
-                            const participanteId = participante.id._serialized;
+                        // REMOVIDO: Verificação de registro de mensagens
+                        // Comando .espioes agora está desabilitado (sistema movido para outro bot)
 
-                            // Verificar se está no registro
-                            if (registroGrupo[participanteId]) {
-                                console.log(`✅ ${participanteId} JÁ MANDOU MENSAGEM - filtrado`);
-                                continue;
-                            }
-
-                            // Verificar também pelo número base (caso o formato seja diferente)
-                            const numeroBase = participanteId.split('@')[0];
-                            const temNumeroBase = Object.keys(registroGrupo).some(id => id.startsWith(numeroBase));
-
-                            if (temNumeroBase) {
-                                console.log(`✅ ${participanteId} (base: ${numeroBase}) JÁ MANDOU MENSAGEM - filtrado`);
-                                continue;
-                            }
-
-                            // Nunca mandou mensagem
-                            nuncaMandaram.push(participanteId);
-                        }
+                        await message.reply(`⚠️ *COMANDO DESABILITADO*\n\nO sistema de registro de mensagens foi movido para outro bot.\nUse o bot de monitoramento para esta funcionalidade.`);
+                        return;
 
                         console.log(`🕵️ Membros que nunca mandaram mensagem: ${nuncaMandaram.length}`);
 
@@ -4228,15 +4298,122 @@ async function processMessage(message) {
                 return;
             }
 
+            // === COMANDO PARA CONFIGURAR NÚMERO DE RELATÓRIO ===
+            if (message.body.startsWith('.config-relatorio ')) {
+                const numeroInput = message.body.replace('.config-relatorio ', '').trim();
+
+                // Validar formato do número (deve começar com 258 e ter 12 dígitos)
+                if (!numeroInput.startsWith('258') || numeroInput.length !== 12) {
+                    await message.reply(`❌ *Número inválido!*\n\n✅ *Formato correto:* 258XXXXXXXXX (12 dígitos)\n\n📝 *Exemplo:* \`.config-relatorio 258847123456\``);
+                    return;
+                }
+
+                // Validar se o número existe no mapeamento
+                if (!global.sistemaRelatorios.validarNumeroNoMapeamento(numeroInput, MAPEAMENTO_IDS)) {
+                    await message.reply(`❌ *Número não encontrado no mapeamento!*\n\n⚠️ O número ${numeroInput} não está registrado no sistema.\n\n💡 Apenas números mapeados podem receber relatórios.`);
+                    return;
+                }
+
+                try {
+                    const chat = await message.getChat();
+                    const grupoNome = chat.name || 'Grupo';
+                    const grupoId = message.from;
+
+                    await global.sistemaRelatorios.configurarNumeroRelatorio(grupoId, numeroInput, grupoNome);
+
+                    await message.reply(`✅ *Relatórios configurados com sucesso!*\n\n📊 **Grupo:** ${grupoNome}\n📱 **Número:** ${numeroInput}\n\n🕙 Relatórios diários serão enviados às 22:00\n\n💬 Uma mensagem de confirmação foi enviada para o número configurado.`);
+
+                    console.log(`✅ Admin configurou relatórios do grupo ${grupoNome} para ${numeroInput}`);
+                } catch (error) {
+                    await message.reply(`❌ *Erro ao configurar relatórios*\n\nTente novamente ou contacte o desenvolvedor.`);
+                    console.error('❌ Erro ao configurar relatórios:', error);
+                }
+                return;
+            }
+
+            // === COMANDO PARA LISTAR CONFIGURAÇÕES DE RELATÓRIO ===
+            if (comando === '.list-relatorios') {
+                const grupoId = message.from;
+                const numeroConfigurado = global.sistemaRelatorios.numerosRelatorio[grupoId];
+
+                if (!numeroConfigurado) {
+                    await message.reply(`📋 *Relatórios não configurados*\n\n⚠️ Este grupo ainda não tem número configurado para receber relatórios.\n\n💡 **Para configurar:**\n\`.config-relatorio 258XXXXXXXXX\``);
+                    return;
+                }
+
+                const chat = await message.getChat();
+                const grupoNome = chat.name || 'Grupo';
+
+                let resposta = `📊 *CONFIGURAÇÃO DE RELATÓRIOS*\n\n`;
+                resposta += `👥 **Grupo:** ${grupoNome}\n`;
+                resposta += `📱 **Número:** ${numeroConfigurado}\n`;
+                resposta += `🕙 **Horário:** Diário às 22:00\n\n`;
+                resposta += `✅ Relatórios ativos`;
+
+                await message.reply(resposta);
+                return;
+            }
+
+            // === COMANDO PARA REMOVER CONFIGURAÇÃO DE RELATÓRIO ===
+            if (comando === '.remove-relatorio') {
+                const grupoId = message.from;
+                const numeroConfigurado = global.sistemaRelatorios.numerosRelatorio[grupoId];
+
+                if (!numeroConfigurado) {
+                    await message.reply(`❌ *Nenhuma configuração encontrada*\n\n⚠️ Este grupo não possui relatórios configurados.`);
+                    return;
+                }
+
+                try {
+                    await global.sistemaRelatorios.removerNumeroRelatorio(grupoId);
+
+                    await message.reply(`✅ *Configuração removida!*\n\n📱 **Número removido:** ${numeroConfigurado}\n\n⚠️ Este grupo não receberá mais relatórios automáticos.`);
+
+                    console.log(`✅ Admin removeu configuração de relatórios do grupo ${grupoId}`);
+                } catch (error) {
+                    await message.reply(`❌ *Erro ao remover configuração*\n\nTente novamente ou contacte o desenvolvedor.`);
+                    console.error('❌ Erro ao remover configuração de relatórios:', error);
+                }
+                return;
+            }
+
+            // === COMANDO PARA TESTAR RELATÓRIO ===
+            if (comando === '.test-relatorio') {
+                const grupoId = message.from;
+                const numeroConfigurado = global.sistemaRelatorios.numerosRelatorio[grupoId];
+
+                if (!numeroConfigurado) {
+                    await message.reply(`❌ *Relatórios não configurados*\n\n⚠️ Configure primeiro usando:\n\`.config-relatorio 258XXXXXXXXX\``);
+                    return;
+                }
+
+                try {
+                    await message.reply(`🧪 *Gerando relatório de teste...*\n\n⏳ Aguarde alguns segundos...`);
+
+                    const chat = await message.getChat();
+                    const grupoNome = chat.name || 'Grupo';
+
+                    await global.sistemaRelatorios.gerarRelatorioGrupo(grupoId, grupoNome);
+
+                    await message.reply(`✅ *Relatório enviado!*\n\n📱 Verifique o número ${numeroConfigurado}`);
+
+                    console.log(`✅ Admin solicitou teste de relatório para grupo ${grupoNome}`);
+                } catch (error) {
+                    await message.reply(`❌ *Erro ao gerar relatório*\n\n${error.message}`);
+                    console.error('❌ Erro ao gerar relatório de teste:', error);
+                }
+                return;
+            }
+
             if (comando === '.test_grupo') {
                 const grupoAtual = message.from;
                 const configGrupo = getConfiguracaoGrupo(grupoAtual);
-                
+
                 if (!configGrupo) {
                     await message.reply('❌ Este grupo não está configurado!');
                     return;
                 }
-                
+
                 console.log(`🧪 Testando Google Sheets para grupo: ${configGrupo.nome}`);
                 
                 const resultado = await enviarParaGoogleSheets('TEST999', '88', '847777777', grupoAtual, configGrupo.nome, 'TestAdmin');
@@ -4281,8 +4458,8 @@ async function processMessage(message) {
                 resposta += `📈 Total enviado: ${dados.length}\n`;
                 resposta += `📅 Hoje: ${hoje.length}\n`;
                 resposta += `📊 Via Google Sheets: ${sheets}\n`;
-                resposta += `📱 Via WhatsApp: ${whatsapp}\n`;
-                resposta += `📱 Fila atual: ${filaMensagens.length}\n\n`;
+                resposta += `📱 Via WhatsApp: ${whatsapp}\n\n`;
+                // REMOVIDO: Fila de encaminhamento (sistema movido para outro bot)
                 
                 if (dados.length > 0) {
                     resposta += `📋 *Últimos 5 enviados:*\n`;
@@ -4595,16 +4772,19 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
             const remetente = message.author || message.from;
             let codigo = null;
 
-            // Verificar se já tem código
+            // Verificar se já tem código (buscar em TODOS os códigos)
+            console.log(`🔍 Procurando código existente para: ${remetente}`);
             for (const [cod, dados] of Object.entries(codigosReferencia)) {
                 if (dados.dono === remetente) {
                     codigo = cod;
+                    console.log(`✅ Código existente encontrado: ${codigo}`);
                     break;
                 }
             }
 
             // Se não tem, criar novo
             if (!codigo) {
+                console.log(`📝 Criando NOVO código para: ${remetente}`);
                 codigo = gerarCodigoReferencia(remetente);
                 codigosReferencia[codigo] = {
                     dono: remetente,
@@ -4612,7 +4792,11 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                     criado: new Date().toISOString(),
                     ativo: true
                 };
-                // Sistema de cache otimizado - sem salvamento em arquivos
+
+                // CORRIGIDO: Salvar IMEDIATAMENTE (não agendar) para garantir persistência
+                console.log(`💾 Salvando código ${codigo} IMEDIATAMENTE...`);
+                await salvarDadosReferencia();
+                console.log(`✅ Código ${codigo} salvo com sucesso!`);
             }
 
             await message.reply(
@@ -4685,17 +4869,46 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                     dataRegistro: new Date().toISOString(),
                     comprasRealizadas: 0
                 };
-                
-                // Sistema de cache otimizado - sem salvamento em arquivos
-                
+
                 const convidadorId = codigosReferencia[codigo].dono;
                 const nomeConvidador = codigosReferencia[codigo].nome;
+
+                // CORRIGIDO: Marcar código como usado
+                codigosReferencia[codigo].usado = true;
+                codigosReferencia[codigo].usadoPor = remetente;
+                codigosReferencia[codigo].dataUso = new Date().toISOString();
+
+                // CORRIGIDO: Inicializar saldo de bônus do convidador
+                if (!bonusSaldos[convidadorId]) {
+                    bonusSaldos[convidadorId] = {
+                        saldo: 0,
+                        detalhesReferencias: {},
+                        historicoSaques: [],
+                        totalReferencias: 0
+                    };
+                }
+                bonusSaldos[convidadorId].totalReferencias++;
+
+                // CORRIGIDO: Salvar IMEDIATAMENTE para garantir persistência
+                console.log(`💾 Salvando uso do código ${codigo} IMEDIATAMENTE...`);
+                await salvarDadosReferencia();
+
+                // Salvar arquivo de membros se foi atualizado
+                try {
+                    await fs.writeFile(ARQUIVO_MEMBROS, JSON.stringify(membrosEntrada, null, 2));
+                    console.log(`✅ Membros entrada salvos com sucesso!`);
+                } catch (error) {
+                    console.log('⚠️ Erro ao salvar membros entrada:', error.message);
+                }
                 
-                await client.sendMessage(message.from, 
+                // CORRIGIDO: Remover @lid e @c.us das menções
+                const convidadorLimpo = convidadorId.replace('@c.us', '').replace('@lid', '');
+
+                await client.sendMessage(message.from,
                     `✅ *CÓDIGO APLICADO COM SUCESSO!*\n\n` +
-                    `🎉 @${convidadorId.replace('@c.us', '')} te convidou - registrado!\n\n` +
+                    `🎉 @${convidadorLimpo} te convidou - registrado!\n\n` +
                     `💎 *Benefícios:*\n` +
-                    `• Nas tuas próximas 5 compras, @${convidadorId.replace('@c.us', '')} ganha 200MB cada\n` +
+                    `• Nas tuas próximas 5 compras, @${convidadorLimpo} ganha 200MB cada\n` +
                     `• Tu recebes teus megas normalmente\n` +
                     `• Ajudas um amigo a ganhar bônus!\n\n` +
                     `🚀 *Próximo passo:* Faz tua primeira compra!`, {
@@ -5117,12 +5330,9 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                 }
 
                 await registrarComprador(message.from, numero, nomeContato, megas);
-                
-                if (message.from === ENCAMINHAMENTO_CONFIG.grupoOrigem) {
-                    const timestampMensagem = new Date().toLocaleString('pt-BR');
-                    adicionarNaFila(dadosCompletos, autorMensagem, configGrupo.nome, timestampMensagem);
-                }
-                
+
+                // REMOVIDO: Encaminhamento de mensagens (sistema movido para outro bot)
+
                 // Enviar mensagem normal + aviso da tabela
                 await message.reply(
                     `✅ *Pedido Recebido!*\n\n` +
@@ -5203,12 +5413,9 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                 }
 
                 await registrarComprador(message.from, numero, nomeContato, megas);
-                
-                if (message.from === ENCAMINHAMENTO_CONFIG.grupoOrigem) {
-                    const timestampMensagem = new Date().toLocaleString('pt-BR');
-                    adicionarNaFila(dadosCompletos, autorMensagem, configGrupo.nome, timestampMensagem);
-                }
-                
+
+                // REMOVIDO: Encaminhamento de mensagens (sistema movido para outro bot)
+
                 await message.reply(
                     `✅ *Pedido Recebido!*\n\n` +
                     `💰 Referência: ${referencia}\n` +
@@ -5254,10 +5461,7 @@ client.on('message', async (message) => {
         await aprenderMapeamento(message);
 
         // Registrar primeira mensagem do membro no grupo (se for grupo)
-        if (message.from.endsWith('@g.us') && !message.fromMe) {
-            const autorMensagem = message.author || message.from;
-            registrarPrimeiraMensagem(message.from, autorMensagem);
-        }
+        // REMOVIDO: Registro de primeira mensagem (sistema movido para outro bot)
 
         // Segundo: tentar processar comandos administrativos rápidos
         const adminProcessed = await handleAdminCommands(message);

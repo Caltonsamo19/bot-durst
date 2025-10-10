@@ -316,19 +316,6 @@ Se não conseguires extrair os dados:
       // Se há múltiplas correspondências, pegar a com maior quantidade (mais provável de estar correta)
       pacoteExato = correspondenciasExatas.sort((a, b) => b.quantidade - a.quantidade)[0];
       console.log(`   ✅ Correspondência exata: ${valorNumerico}MT = ${pacoteExato.descricao} (${pacoteExato.quantidade}MB)`);
-    }
-
-    // Se não encontrar exato, tentar com tolerância de ±1MT
-    if (!pacoteExato) {
-      let correspondenciasAproximadas = precos.filter(p => Math.abs(p.preco - valorNumerico) <= 1);
-      if (correspondenciasAproximadas.length > 0) {
-        // Priorizar maior quantidade também nas aproximadas
-        pacoteExato = correspondenciasAproximadas.sort((a, b) => b.quantidade - a.quantidade)[0];
-        console.log(`   ⚡ Correspondência aproximada: ${valorNumerico}MT ≈ ${pacoteExato.preco}MT = ${pacoteExato.descricao} (${pacoteExato.quantidade}MB)`);
-      }
-    }
-
-    if (pacoteExato) {
       return pacoteExato.quantidade; // Retorna em MB
     }
 

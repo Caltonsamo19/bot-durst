@@ -1,5 +1,7 @@
 const axios = require('axios');
 const cron = require('node-cron');
+const fs = require('fs').promises;
+const path = require('path');
 
 class SistemaRelatorios {
     constructor(client, googleSheetsConfig, pagamentosConfig) {
@@ -9,31 +11,81 @@ class SistemaRelatorios {
         this.isRunning = false;
 
         // Configuração de números para relatórios por grupo
-        // AJUSTE ESTES NÚMEROS CONFORME NECESSÁRIO
-        this.numerosRelatorio = {
-            // 'GRUPO_ID': 'NUMERO_WHATSAPP',
-            // Exemplo:
-            // '258820749141-1441573529@g.us': '258847123456',
-            // 'outro_grupo_id@g.us': '258841234567'
-        };
+        this.numerosRelatorio = {};
+
+        // Arquivo de persistência
+        this.arquivoConfig = path.join(__dirname, 'config_relatorios.json');
     }
 
     /**
-     * Configura número de relatório para um grupo
-     * @param {string} grupoId - ID do grupo
-     * @param {string} numeroRelatorio - Número para receber relatórios
+     * Carrega configurações salvas do arquivo
      */
-    configurarNumeroRelatorio(grupoId, numeroRelatorio) {
+    async carregarConfiguracoes() {
+        try {
+            const data = await fs.readFile(this.arquivoConfig, 'utf8');
+            this.numerosRelatorio = JSON.parse(data);
+            console.log(`✅ Carregadas ${Object.keys(this.numerosRelatorio).length} configurações de relatórios`);
+        } catch (error) {
+            if (error.code === 'ENOENT') {
+                console.log('📋 Nenhuma configuração de relatórios encontrada - iniciando vazio');
+            } else {
+                console.error('❌ Erro ao carregar configurações de relatórios:', error.message);
+            }
+        }
+    }
+
+    /**
+     * Salva configurações no arquivo
+     */
+    async salvarConfiguracoes() {
+        try {
+            await fs.writeFile(this.arquivoConfig, JSON.stringify(this.numerosRelatorio, null, 2));
+            console.log(`💾 Salvas ${Object.keys(this.numerosRelatorio).length} configurações de relatórios`);
+        } catch (error) {
+            console.error('❌ Erro ao salvar configurações de relatórios:', error.message);
+        }
+    }
+
+    /**
+     * Configura número de relatório para um grupo (com persistência)
+     * @param {string} grupoId - ID do grupo
+     * @param {string} numeroRelatorio - Número para receber relatórios (com 258)
+     * @param {string} grupoNome - Nome do grupo
+     */
+    async configurarNumeroRelatorio(grupoId, numeroRelatorio, grupoNome = 'Grupo') {
         this.numerosRelatorio[grupoId] = numeroRelatorio;
-        console.log(`✅ Configurado relatório do grupo ${grupoId} para ${numeroRelatorio}`);
+        await this.salvarConfiguracoes();
+        console.log(`✅ Configurado relatório do grupo ${grupoNome} (${grupoId}) para ${numeroRelatorio}`);
+
+        // Enviar mensagem de confirmação no privado
+        try {
+            const numeroFormatado = numeroRelatorio + '@c.us';
+            const mensagem = `📊 *RELATÓRIOS ATIVADOS*\n\n` +
+                `✅ Seu número foi vinculado para receber relatórios diários do grupo:\n\n` +
+                `👥 *${grupoNome}*\n\n` +
+                `🕙 Você receberá relatórios automáticos todos os dias às 22:00 com:\n` +
+                `• Total de vendas (pedidos)\n` +
+                `• Total de pagamentos confirmados\n` +
+                `• Performance e estatísticas\n\n` +
+                `🔔 Você também pode solicitar relatórios manuais a qualquer momento usando comandos no grupo.\n\n` +
+                `✅ Configuração salva com sucesso!`;
+
+            await this.client.sendMessage(numeroFormatado, mensagem);
+            console.log(`📤 Mensagem de confirmação enviada para ${numeroRelatorio}`);
+        } catch (error) {
+            console.error(`❌ Erro ao enviar mensagem de confirmação para ${numeroRelatorio}:`, error.message);
+        }
+
+        return true;
     }
 
     /**
      * Remove configuração de número de relatório
      * @param {string} grupoId - ID do grupo
      */
-    removerNumeroRelatorio(grupoId) {
+    async removerNumeroRelatorio(grupoId) {
         delete this.numerosRelatorio[grupoId];
+        await this.salvarConfiguracoes();
         console.log(`❌ Removido relatório do grupo ${grupoId}`);
     }
 
@@ -45,6 +97,19 @@ class SistemaRelatorios {
         for (const [grupoId, numero] of Object.entries(this.numerosRelatorio)) {
             console.log(`  ${grupoId} → ${numero}`);
         }
+    }
+
+    /**
+     * Verifica se número existe no mapeamento
+     * @param {string} numero - Número com 258
+     * @param {Object} mapeamentoIDs - Objeto de mapeamento LID
+     * @returns {boolean}
+     */
+    validarNumeroNoMapeamento(numero, mapeamentoIDs) {
+        // Verificar se o número existe como valor no mapeamento
+        const numeroFormatado = numero + '@c.us';
+        const numerosValidos = Object.values(mapeamentoIDs);
+        return numerosValidos.includes(numeroFormatado);
     }
 
     /**
