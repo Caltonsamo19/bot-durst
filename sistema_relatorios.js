@@ -13,8 +13,14 @@ class SistemaRelatorios {
         // Configuração de números para relatórios por grupo
         this.numerosRelatorio = {};
 
+        // Preços de revenda por grupo (MT por GB)
+        this.precosRevenda = {};
+
         // Arquivo de persistência
         this.arquivoConfig = path.join(__dirname, 'config_relatorios.json');
+
+        // Preço fixo de compra (MT por GB)
+        this.PRECO_COMPRA = 12;
     }
 
     /**
@@ -23,7 +29,9 @@ class SistemaRelatorios {
     async carregarConfiguracoes() {
         try {
             const data = await fs.readFile(this.arquivoConfig, 'utf8');
-            this.numerosRelatorio = JSON.parse(data);
+            const config = JSON.parse(data);
+            this.numerosRelatorio = config.numerosRelatorio || config; // Retrocompatibilidade
+            this.precosRevenda = config.precosRevenda || {};
             console.log(`✅ Carregadas ${Object.keys(this.numerosRelatorio).length} configurações de relatórios`);
         } catch (error) {
             if (error.code === 'ENOENT') {
@@ -39,7 +47,11 @@ class SistemaRelatorios {
      */
     async salvarConfiguracoes() {
         try {
-            await fs.writeFile(this.arquivoConfig, JSON.stringify(this.numerosRelatorio, null, 2));
+            const config = {
+                numerosRelatorio: this.numerosRelatorio,
+                precosRevenda: this.precosRevenda
+            };
+            await fs.writeFile(this.arquivoConfig, JSON.stringify(config, null, 2));
             console.log(`💾 Salvas ${Object.keys(this.numerosRelatorio).length} configurações de relatórios`);
         } catch (error) {
             console.error('❌ Erro ao salvar configurações de relatórios:', error.message);
@@ -51,22 +63,30 @@ class SistemaRelatorios {
      * @param {string} grupoId - ID do grupo
      * @param {string} numeroRelatorio - Número para receber relatórios (com 258)
      * @param {string} grupoNome - Nome do grupo
+     * @param {number} precoRevenda - Preço de revenda em MT/GB (16-18)
      */
-    async configurarNumeroRelatorio(grupoId, numeroRelatorio, grupoNome = 'Grupo') {
+    async configurarNumeroRelatorio(grupoId, numeroRelatorio, grupoNome = 'Grupo', precoRevenda = 16) {
         this.numerosRelatorio[grupoId] = numeroRelatorio;
+        this.precosRevenda[grupoId] = precoRevenda;
         await this.salvarConfiguracoes();
-        console.log(`✅ Configurado relatório do grupo ${grupoNome} (${grupoId}) para ${numeroRelatorio}`);
+        console.log(`✅ Configurado relatório do grupo ${grupoNome} (${grupoId}) para ${numeroRelatorio} - Preço: ${precoRevenda} MT/GB`);
 
         // Enviar mensagem de confirmação no privado
         try {
             const numeroFormatado = numeroRelatorio + '@c.us';
+            const lucroEstimado = precoRevenda - this.PRECO_COMPRA;
             const mensagem = `📊 *RELATÓRIOS ATIVADOS*\n\n` +
                 `✅ Seu número foi vinculado para receber relatórios diários do grupo:\n\n` +
                 `👥 *${grupoNome}*\n\n` +
                 `🕙 Você receberá relatórios automáticos todos os dias às 22:00 com:\n` +
                 `• Total de vendas (pedidos)\n` +
                 `• Total de pagamentos confirmados\n` +
-                `• Performance e estatísticas\n\n` +
+                `• Performance e estatísticas\n` +
+                `• 💰 Lucro diário calculado\n\n` +
+                `💸 *PREÇOS CONFIGURADOS:*\n` +
+                `• Compra: ${this.PRECO_COMPRA} MT/GB\n` +
+                `• Revenda: ${precoRevenda} MT/GB\n` +
+                `• Lucro: ${lucroEstimado} MT/GB\n\n` +
                 `🔔 Você também pode solicitar relatórios manuais a qualquer momento usando comandos no grupo.\n\n` +
                 `✅ Configuração salva com sucesso!`;
 
@@ -255,8 +275,9 @@ class SistemaRelatorios {
      * Processa e cruza dados de pedidos e pagamentos
      * @param {Array} pedidos - Array de pedidos no formato REF|MEGAS|NUMERO
      * @param {Array} pagamentos - Array de pagamentos no formato REF|VALOR|NUMERO
+     * @param {number} precoRevenda - Preço de revenda do grupo (MT/GB)
      */
-    processarDadosCombinados(pedidos, pagamentos) {
+    processarDadosCombinados(pedidos, pagamentos, precoRevenda = 16) {
         const resultado = {
             totalPedidos: pedidos.length,
             totalGigas: 0,
@@ -264,6 +285,8 @@ class SistemaRelatorios {
             totalArrecadado: 0,
             pedidosPendentes: 0,
             valorPendente: 0,
+            custoTotal: 0,
+            lucroTotal: 0,
             detalhes: []
         };
 
@@ -322,6 +345,10 @@ class SistemaRelatorios {
             }
         });
 
+        // Calcular custos e lucros
+        resultado.custoTotal = Math.round(resultado.totalGigas * this.PRECO_COMPRA);
+        resultado.lucroTotal = resultado.totalArrecadado - resultado.custoTotal;
+
         // Arredondar valores
         resultado.totalGigas = parseFloat(resultado.totalGigas.toFixed(2));
         resultado.totalArrecadado = Math.round(resultado.totalArrecadado);
@@ -347,8 +374,9 @@ class SistemaRelatorios {
      * @param {Object} dados - Dados processados
      * @param {string} grupoNome - Nome do grupo
      * @param {Object} periodo - Período do relatório
+     * @param {number} precoRevenda - Preço de revenda do grupo (MT/GB)
      */
-    gerarTextoRelatorio(dados, grupoNome, periodo) {
+    gerarTextoRelatorio(dados, grupoNome, periodo, precoRevenda = 16) {
         let texto = `📊 *RELATÓRIO 24H* - ${grupoNome}\n`;
         texto += `📅 Período: ${periodo.inicioFormatado} - ${periodo.fimFormatado}\n`;
         texto += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
@@ -375,6 +403,16 @@ class SistemaRelatorios {
             texto += `⏳ Pendentes: ${dados.pedidosPendentes} pedidos (≈${dados.valorPendente.toLocaleString('pt-BR')} MT)\n`;
         }
         texto += `\n`;
+
+        // Seção Lucro (só se houver pagamentos confirmados)
+        if (dados.pagamentosConfirmados > 0) {
+            const lucroPorGiga = precoRevenda - this.PRECO_COMPRA;
+
+            texto += `💰 *LUCRO (Últimas 24h):*\n`;
+            texto += `📥 Custo total: ${dados.custoTotal.toLocaleString('pt-BR')} MT (${this.PRECO_COMPRA} MT/GB)\n`;
+            texto += `📤 Receita total: ${dados.totalArrecadado.toLocaleString('pt-BR')} MT (${precoRevenda} MT/GB)\n`;
+            texto += `💚 Lucro líquido: ${dados.lucroTotal.toLocaleString('pt-BR')} MT (${lucroPorGiga} MT/GB)\n\n`;
+        }
 
         // Seção Performance (só se houver dados)
         if (dados.totalPedidos > 0) {
@@ -409,6 +447,9 @@ class SistemaRelatorios {
 
             const periodo = this.calcularPeriodo24h();
 
+            // Buscar preço de revenda do grupo (padrão 16 MT/GB)
+            const precoRevenda = this.precosRevenda[grupoId] || 16;
+
             // Buscar dados das duas planilhas
             const [resultadoPedidos, resultadoPagamentos] = await Promise.all([
                 this.buscarPedidos24h(grupoId, periodo),
@@ -418,11 +459,12 @@ class SistemaRelatorios {
             // Processar dados combinados
             const dados = this.processarDadosCombinados(
                 resultadoPedidos.pedidos,
-                resultadoPagamentos.pagamentos
+                resultadoPagamentos.pagamentos,
+                precoRevenda
             );
 
             // Gerar texto do relatório
-            const textoRelatorio = this.gerarTextoRelatorio(dados, grupoNome, periodo);
+            const textoRelatorio = this.gerarTextoRelatorio(dados, grupoNome, periodo, precoRevenda);
 
             // Verificar se tem número configurado para este grupo
             const numeroRelatorio = this.numerosRelatorio[grupoId];

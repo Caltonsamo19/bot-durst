@@ -5,13 +5,10 @@ const fs = require('fs').promises;
 const fssync = require('fs');
 const path = require('path');
 const axios = require('axios'); // npm install axios
-const { spawn } = require('child_process');
 
 // === LIMPEZA AUTOMÁTICA DE CACHE ===
 const CACHE_DIR = path.join(__dirname, '.wwebjs_cache');
-const CACHE_CLEANUP_INTERVAL = 12 * 60 * 60 * 1000; // 12 horas em milissegundos
-const HORARIOS_FIXOS = [18, 20]; // Horários fixos para limpeza (18h e 20h)
-const ARQUIVO_REINICIO = path.join(__dirname, '.reinicio_status.json');
+const HORARIOS_FIXOS = [6, 12, 18, 21]; // Horários fixos para limpeza (6h, 12h, 18h e 21h)
 let ultimaLimpeza = new Date();
 let clienteGlobal = null; // Referência ao cliente para enviar notificações
 
@@ -41,80 +38,86 @@ async function notificarGrupos(mensagem) {
     }
 }
 
-// Função para reiniciar o bot
-function reiniciarBot() {
-    console.log('🔄 Reiniciando bot...');
-
-    const child = spawn(process.argv[0], process.argv.slice(1), {
-        detached: true,
-        stdio: 'inherit'
-    });
-
-    child.unref();
-    process.exit(0);
-}
-
-// Função de limpeza com reinício automático
+// Função para limpar cache e reiniciar sessão (sem perder autenticação)
 async function limparCacheWhatsApp(motivo = 'intervalo') {
     try {
         console.log(`🧹 Iniciando limpeza da cache do WhatsApp (${motivo})...`);
 
-        // Notificar grupos antes de reiniciar
+        // Notificar grupos antes de desconectar
         const horaAtual = new Date().toLocaleTimeString('pt-BR');
-        await notificarGrupos(`⚠️ *AVISO DE MANUTENÇÃO*\n\n🔧 O bot será reiniciado para manutenção preventiva\n⏱️ Horário: ${horaAtual}\n🎯 Objetivo: Manter o sistema rápido e saudável\n⏳ Tempo estimado: 1-2 minutos\n\n_Aguarde alguns instantes..._`);
+        await notificarGrupos(`⚠️ *AVISO DE MANUTENÇÃO*\n\n🔧 O bot será reiniciado para manutenção preventiva\n⏱️ Horário: ${horaAtual}\n🎯 Objetivo: Manter o sistema rápido e saudável\n⏳ Tempo estimado: 30-60 segundos\n\n_Aguarde alguns instantes..._`);
 
         // Aguardar 3 segundos para garantir que as mensagens foram enviadas
         await new Promise(resolve => setTimeout(resolve, 3000));
 
-        // Verifica se a pasta existe
+        // Marcar que está aguardando notificação após reconexão
+        aguardandoNotificacaoReconexao = true;
+
+        console.log('🔌 Desconectando cliente WhatsApp...');
+
+        // Destruir a sessão atual (libera memória RAM e cache)
+        await client.destroy();
+
+        console.log('🧹 Limpando cache do disco...');
+
+        // Limpar cache do disco
         if (fssync.existsSync(CACHE_DIR)) {
             await fs.rm(CACHE_DIR, { recursive: true, force: true });
-            console.log('✅ Cache limpa com sucesso!');
-            ultimaLimpeza = new Date();
-            console.log(`⏰ Última limpeza: ${ultimaLimpeza.toLocaleString('pt-BR')}`);
-        } else {
-            console.log('ℹ️ Pasta de cache não encontrada, pulando limpeza');
+            console.log('✅ Cache do disco limpa!');
         }
 
-        // Salvar flag de reinício para notificar após o restart
-        await fs.writeFile(ARQUIVO_REINICIO, JSON.stringify({
-            reiniciado: true,
-            motivoLimpeza: motivo,
-            horaLimpeza: new Date().toISOString()
-        }));
+        // Forçar garbage collection se disponível (limpa memória RAM)
+        if (global.gc) {
+            global.gc();
+            console.log('♻️ Garbage collection executado!');
+        }
 
-        // Aguardar mais 2 segundos antes de reiniciar
+        ultimaLimpeza = new Date();
+        console.log(`⏰ Última limpeza: ${ultimaLimpeza.toLocaleString('pt-BR')}`);
+
+        // Aguardar 2 segundos antes de reconectar
         await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Reiniciar o bot
-        reiniciarBot();
+        console.log('🔄 Reinicializando cliente WhatsApp...');
+
+        // Reinicializar cliente (reconecta sem perder autenticação)
+        await client.initialize();
+
+        // A notificação de "BOT ONLINE" será enviada automaticamente
+        // quando o evento 'ready' for disparado novamente
 
     } catch (error) {
-        console.error('❌ Erro ao limpar cache:', error.message);
+        console.error('❌ Erro ao limpar cache e reiniciar sessão:', error.message);
+
+        // Tentar reinicializar mesmo se houver erro
+        try {
+            console.log('⚠️ Tentando reinicializar cliente após erro...');
+            await client.initialize();
+        } catch (retryError) {
+            console.error('❌ Falha crítica ao reinicializar:', retryError.message);
+        }
     }
 }
 
-// Verificar se o bot foi reiniciado e notificar
-async function verificarReinicio() {
+// Variável para controlar se deve notificar após reconexão
+let aguardandoNotificacaoReconexao = false;
+
+// Verificar se deve notificar após reconexão automática
+async function verificarNotificacaoReconexao() {
     try {
-        if (fssync.existsSync(ARQUIVO_REINICIO)) {
-            const dados = JSON.parse(await fs.readFile(ARQUIVO_REINICIO, 'utf-8'));
+        if (aguardandoNotificacaoReconexao) {
+            console.log('✅ Bot reconectado com sucesso após manutenção');
 
-            if (dados.reiniciado) {
-                console.log('✅ Bot reiniciado com sucesso após limpeza de cache');
+            // Aguardar 3 segundos para garantir que o WhatsApp está estável
+            await new Promise(resolve => setTimeout(resolve, 3000));
 
-                // Aguardar 5 segundos para garantir que o WhatsApp está conectado
-                await new Promise(resolve => setTimeout(resolve, 5000));
+            const horaAtual = new Date().toLocaleTimeString('pt-BR');
+            await notificarGrupos(`✅ *BOT ONLINE*\n\n🎉 Manutenção concluída com sucesso!\n⏰ Horário: ${horaAtual}\n💚 Sistema otimizado e funcionando normalmente\n\n_Todos os serviços estão operacionais!_`);
 
-                const horaAtual = new Date().toLocaleTimeString('pt-BR');
-                await notificarGrupos(`✅ *BOT ONLINE*\n\n🎉 Manutenção concluída com sucesso!\n⏰ Horário: ${horaAtual}\n💚 Sistema otimizado e funcionando normalmente\n\n_Todos os serviços estão operacionais!_`);
-
-                // Remover arquivo de status
-                await fs.unlink(ARQUIVO_REINICIO);
-            }
+            aguardandoNotificacaoReconexao = false;
         }
     } catch (error) {
-        console.error('❌ Erro ao verificar reinício:', error.message);
+        console.error('❌ Erro ao notificar reconexão:', error.message);
     }
 }
 
@@ -140,13 +143,7 @@ function verificarHorarioFixo() {
 // Agendar limpeza automática
 function iniciarLimpezaAutomatica() {
     console.log('⚙️ Limpeza automática de cache ativada:');
-    console.log('   - Intervalo: a cada 12 horas');
-    console.log('   - Horários fixos: 18:00 e 20:00');
-
-    // Limpeza a cada 12 horas
-    setInterval(() => {
-        limparCacheWhatsApp('intervalo 12h');
-    }, CACHE_CLEANUP_INTERVAL);
+    console.log('   - Horários fixos: 6:00, 12:00, 18:00 e 21:00');
 
     // Verificar horários fixos a cada minuto
     setInterval(verificarHorarioFixo, 60 * 1000);
@@ -2237,9 +2234,46 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
     const grupoNome = getConfiguracaoGrupo(grupoId)?.nome || 'Desconhecido';
     const timestamp = new Date().toLocaleString('pt-BR');
     const linhaCompleta = `${referencia}|${valor}|${numero}`;
-    
+
     console.log(`📊 ENVIANDO PARA GOOGLE SHEETS [${grupoNome}]: ${linhaCompleta}`);
-    
+
+    // === VALIDAÇÕES PREVENTIVAS ===
+    if (!referencia || !valor || !numero) {
+        console.error(`❌ VALIDAÇÃO FALHOU: Dados incompletos - referencia=${referencia}, valor=${valor}, numero=${numero}`);
+        return {
+            sucesso: false,
+            erro: 'Dados incompletos para envio'
+        };
+    }
+
+    // Validar formato da referência
+    if (typeof referencia !== 'string' || referencia.length < 3) {
+        console.error(`❌ VALIDAÇÃO FALHOU: Referência inválida - ${referencia}`);
+        return {
+            sucesso: false,
+            erro: 'Referência inválida'
+        };
+    }
+
+    // Validar número
+    const numeroLimpo = String(numero).replace(/[^0-9]/g, '');
+    if (numeroLimpo.length < 9) {
+        console.error(`❌ VALIDAÇÃO FALHOU: Número inválido - ${numero}`);
+        return {
+            sucesso: false,
+            erro: 'Número de telefone inválido'
+        };
+    }
+
+    // Validar URL do Google Sheets
+    if (!GOOGLE_SHEETS_CONFIG.scriptUrl || GOOGLE_SHEETS_CONFIG.scriptUrl === '') {
+        console.error(`❌ VALIDAÇÃO FALHOU: URL do Google Sheets não configurada`);
+        return {
+            sucesso: false,
+            erro: 'Google Sheets não configurado'
+        };
+    }
+
     // Cache da transação
     const transacaoKey = `${grupoId}_${Date.now()}_${numero}`;
     cacheTransacoes.set(transacaoKey, {
@@ -2252,10 +2286,44 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
         metodo: 'pendente'
     });
 
-    // === TENTAR GOOGLE SHEETS PRIMEIRO ===
-    const resultado = await enviarParaGoogleSheets(referencia, valor, numero, grupoId, grupoNome, autorMensagem);
+    // === TENTAR GOOGLE SHEETS COM RETRY ===
+    let tentativas = 0;
+    let resultado = null;
+    const maxTentativas = 3;
 
-    if (resultado.sucesso) {
+    while (tentativas < maxTentativas) {
+        tentativas++;
+
+        try {
+            console.log(`🔄 Tentativa ${tentativas}/${maxTentativas} de envio para Google Sheets...`);
+            resultado = await enviarParaGoogleSheets(referencia, valor, numero, grupoId, grupoNome, autorMensagem);
+
+            if (resultado.sucesso) {
+                break; // Sucesso, sair do loop
+            } else if (resultado.duplicado) {
+                break; // Duplicado, sair do loop (não tentar novamente)
+            } else {
+                console.warn(`⚠️ Tentativa ${tentativas} falhou:`, resultado.erro || 'Erro desconhecido');
+
+                // Aguardar antes de tentar novamente (exceto na última tentativa)
+                if (tentativas < maxTentativas) {
+                    const delay = tentativas * 2000; // 2s, 4s
+                    console.log(`⏳ Aguardando ${delay/1000}s antes da próxima tentativa...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        } catch (error) {
+            console.error(`❌ Erro na tentativa ${tentativas}:`, error.message);
+
+            // Aguardar antes de tentar novamente (exceto na última tentativa)
+            if (tentativas < maxTentativas) {
+                const delay = tentativas * 2000;
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+
+    if (resultado && resultado.sucesso) {
         // Atualizar cache
         if (cacheTransacoes.has(transacaoKey)) {
             const transacao = cacheTransacoes.get(transacaoKey);
@@ -2263,16 +2331,29 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
             transacao.metodo = 'google_sheets';
             transacao.row = resultado.row;
         }
-        console.log(`✅ [${grupoNome}] Enviado para Google Sheets! Row: ${resultado.row}`);
+        console.log(`✅ [${grupoNome}] Enviado para Google Sheets com sucesso! Row: ${resultado.row}`);
 
         // === REGISTRAR COMPRA PENDENTE NO SISTEMA DE COMPRAS ===
         if (sistemaCompras) {
-            // Extrair apenas o número do autorMensagem (remover @c.us se houver)
-            const numeroRemetente = autorMensagem.replace('@c.us', '');
-            console.log(`🔍 DEBUG COMPRA: autorMensagem="${autorMensagem}" | numeroRemetente="${numeroRemetente}" | numero="${numero}"`);
-            await sistemaCompras.registrarCompraPendente(referencia, numero, valor, numeroRemetente, grupoId);
+            try {
+                // Extrair apenas o número do autorMensagem (remover @c.us se houver)
+                const numeroRemetente = autorMensagem.replace('@c.us', '');
+                console.log(`🔍 DEBUG COMPRA: autorMensagem="${autorMensagem}" | numeroRemetente="${numeroRemetente}" | numero="${numero}"`);
+                await sistemaCompras.registrarCompraPendente(referencia, numero, valor, numeroRemetente, grupoId);
+            } catch (error) {
+                console.error('❌ Erro ao registrar compra pendente:', error);
+                // Não falhar o envio por causa disso
+            }
         }
-    } else if (resultado.duplicado) {
+
+        return {
+            sucesso: true,
+            referencia: referencia,
+            row: resultado.row,
+            linhaCompleta: linhaCompleta
+        };
+
+    } else if (resultado && resultado.duplicado) {
         // Marcar como duplicado no cache
         if (cacheTransacoes.has(transacaoKey)) {
             cacheTransacoes.get(transacaoKey).status = 'duplicado';
@@ -2281,25 +2362,25 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
 
         // Retornar informações do duplicado para o bot processar
         return {
+            sucesso: false,
             duplicado: true,
             referencia: resultado.referencia,
             status_existente: resultado.status_existente,
             message: resultado.message
         };
     } else {
-        // REMOVIDO: Fallback WhatsApp (sistema movido para outro bot)
-        console.log(`❌ [${grupoNome}] Google Sheets falhou - sem fallback disponível`);
+        // Todas as tentativas falharam
+        console.error(`❌ [${grupoNome}] TODAS AS ${maxTentativas} TENTATIVAS FALHARAM para ${referencia}`);
         if (cacheTransacoes.has(transacaoKey)) {
             cacheTransacoes.get(transacaoKey).metodo = 'falhou';
         }
+
+        return {
+            sucesso: false,
+            erro: resultado?.erro || 'Falha ao enviar para Google Sheets após múltiplas tentativas',
+            tentativas: maxTentativas
+        };
     }
-    
-    // === BACKUP REMOVIDO - OTIMIZAÇÃO ===
-    // Não salva mais arquivos .txt desnecessários
-    
-    // Cache já auto-limpa automaticamente
-    
-    return linhaCompleta;
 }
 
 // REMOVIDO: Função enviarViaWhatsAppTasker
@@ -2786,11 +2867,13 @@ client.on('ready', async () => {
     // Configurar cliente global para notificações
     clienteGlobal = client;
 
-    // Verificar se o bot acabou de ser reiniciado e notificar grupos
-    await verificarReinicio();
+    // Verificar se deve notificar após reconexão automática
+    await verificarNotificacaoReconexao();
 
-    // Iniciar limpeza automática de cache
-    iniciarLimpezaAutomatica();
+    // Iniciar limpeza automática de cache (só na primeira vez)
+    if (!aguardandoNotificacaoReconexao) {
+        iniciarLimpezaAutomatica();
+    }
 
     // Carregar mapeamentos LID salvos
     await carregarMapeamentos();
@@ -2809,6 +2892,7 @@ client.on('ready', async () => {
 
         console.log('📊 Sistema de relatórios iniciado!');
         console.log('⏰ Relatórios agendados para 22:00 diariamente');
+        console.log('💰 Preço de compra: 12 MT/GB | Revenda: 16-18 MT/GB');
         console.log('📞 Comandos: .config-relatorio .list-relatorios .remove-relatorio .test-relatorio');
 
     } catch (error) {
@@ -4300,11 +4384,19 @@ async function processMessage(message) {
 
             // === COMANDO PARA CONFIGURAR NÚMERO DE RELATÓRIO ===
             if (message.body.startsWith('.config-relatorio ')) {
-                const numeroInput = message.body.replace('.config-relatorio ', '').trim();
+                const args = message.body.replace('.config-relatorio ', '').trim().split(' ');
+                const numeroInput = args[0];
+                const precoRevenda = args[1] ? parseFloat(args[1]) : 16;
 
                 // Validar formato do número (deve começar com 258 e ter 12 dígitos)
                 if (!numeroInput.startsWith('258') || numeroInput.length !== 12) {
-                    await message.reply(`❌ *Número inválido!*\n\n✅ *Formato correto:* 258XXXXXXXXX (12 dígitos)\n\n📝 *Exemplo:* \`.config-relatorio 258847123456\``);
+                    await message.reply(`❌ *Número inválido!*\n\n✅ *Formato correto:* 258XXXXXXXXX PREÇO\n\n📝 *Exemplos:*\n\`.config-relatorio 258847123456 16\` (16 MT/GB)\n\`.config-relatorio 258847123456 17\` (17 MT/GB)\n\`.config-relatorio 258847123456 18\` (18 MT/GB)\n\n⚠️ Se não especificar preço, será usado 16 MT/GB`);
+                    return;
+                }
+
+                // Validar preço de revenda (16-18 MT/GB)
+                if (precoRevenda < 16 || precoRevenda > 18) {
+                    await message.reply(`❌ *Preço inválido!*\n\n✅ O preço deve estar entre 16 e 18 MT/GB\n\n📝 *Exemplo:* \`.config-relatorio 258847123456 17\``);
                     return;
                 }
 
@@ -4319,11 +4411,11 @@ async function processMessage(message) {
                     const grupoNome = chat.name || 'Grupo';
                     const grupoId = message.from;
 
-                    await global.sistemaRelatorios.configurarNumeroRelatorio(grupoId, numeroInput, grupoNome);
+                    await global.sistemaRelatorios.configurarNumeroRelatorio(grupoId, numeroInput, grupoNome, precoRevenda);
 
-                    await message.reply(`✅ *Relatórios configurados com sucesso!*\n\n📊 **Grupo:** ${grupoNome}\n📱 **Número:** ${numeroInput}\n\n🕙 Relatórios diários serão enviados às 22:00\n\n💬 Uma mensagem de confirmação foi enviada para o número configurado.`);
+                    await message.reply(`✅ *Relatórios configurados com sucesso!*\n\n📊 **Grupo:** ${grupoNome}\n📱 **Número:** ${numeroInput}\n💸 **Preço revenda:** ${precoRevenda} MT/GB\n💰 **Lucro por GB:** ${precoRevenda - 12} MT\n\n🕙 Relatórios diários serão enviados às 22:00\n\n💬 Uma mensagem de confirmação foi enviada para o número configurado.`);
 
-                    console.log(`✅ Admin configurou relatórios do grupo ${grupoNome} para ${numeroInput}`);
+                    console.log(`✅ Admin configurou relatórios do grupo ${grupoNome} para ${numeroInput} - Preço: ${precoRevenda} MT/GB`);
                 } catch (error) {
                     await message.reply(`❌ *Erro ao configurar relatórios*\n\nTente novamente ou contacte o desenvolvedor.`);
                     console.error('❌ Erro ao configurar relatórios:', error);
@@ -4337,17 +4429,23 @@ async function processMessage(message) {
                 const numeroConfigurado = global.sistemaRelatorios.numerosRelatorio[grupoId];
 
                 if (!numeroConfigurado) {
-                    await message.reply(`📋 *Relatórios não configurados*\n\n⚠️ Este grupo ainda não tem número configurado para receber relatórios.\n\n💡 **Para configurar:**\n\`.config-relatorio 258XXXXXXXXX\``);
+                    await message.reply(`📋 *Relatórios não configurados*\n\n⚠️ Este grupo ainda não tem número configurado para receber relatórios.\n\n💡 **Para configurar:**\n\`.config-relatorio 258XXXXXXXXX PREÇO\`\n\n📝 **Exemplo:**\n\`.config-relatorio 258847123456 17\``);
                     return;
                 }
 
                 const chat = await message.getChat();
                 const grupoNome = chat.name || 'Grupo';
+                const precoRevenda = global.sistemaRelatorios.precosRevenda[grupoId] || 16;
+                const lucro = precoRevenda - 12;
 
                 let resposta = `📊 *CONFIGURAÇÃO DE RELATÓRIOS*\n\n`;
                 resposta += `👥 **Grupo:** ${grupoNome}\n`;
                 resposta += `📱 **Número:** ${numeroConfigurado}\n`;
                 resposta += `🕙 **Horário:** Diário às 22:00\n\n`;
+                resposta += `💸 **PREÇOS:**\n`;
+                resposta += `• Compra: 12 MT/GB\n`;
+                resposta += `• Revenda: ${precoRevenda} MT/GB\n`;
+                resposta += `• Lucro: ${lucro} MT/GB\n\n`;
                 resposta += `✅ Relatórios ativos`;
 
                 await message.reply(resposta);
@@ -5017,10 +5115,62 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                     return;
                 }
                 
+                // === VALIDAÇÕES ADICIONAIS DE SEGURANÇA ===
+
+                // Verificar se já existe saque pendente deste cliente
+                const saquePendente = Object.values(pedidosSaque).find(s =>
+                    s.cliente === remetente &&
+                    s.status === 'pendente' &&
+                    s.numeroDestino === numeroDestino
+                );
+
+                if (saquePendente) {
+                    await message.reply(
+                        `⚠️ *SAQUE PENDENTE DETECTADO*\n\n` +
+                        `🔖 Referência: *${saquePendente.referencia}*\n` +
+                        `📱 Número: ${saquePendente.numeroDestino}\n` +
+                        `💎 Quantidade: ${saquePendente.quantidade}MB\n` +
+                        `📅 Data: ${new Date(saquePendente.dataSolicitacao).toLocaleString('pt-BR')}\n\n` +
+                        `⏳ Aguarde o processamento do saque anterior antes de solicitar um novo.\n` +
+                        `📞 Prazo: até 24h`
+                    );
+                    return;
+                }
+
+                // Verificar limite diário de saques
+                const hoje = new Date().toDateString();
+                const saquesHoje = Object.values(pedidosSaque).filter(s =>
+                    s.cliente === remetente &&
+                    new Date(s.dataSolicitacao).toDateString() === hoje
+                );
+
+                if (saquesHoje.length >= 3) {
+                    await message.reply(
+                        `❌ *LIMITE DIÁRIO ATINGIDO*\n\n` +
+                        `🚫 Limite: 3 saques por dia\n` +
+                        `📊 Já solicitados hoje: ${saquesHoje.length}\n\n` +
+                        `⏰ Tente novamente amanhã!`
+                    );
+                    return;
+                }
+
                 // Gerar referência do pedido
                 const agora = new Date();
                 const referenciaSaque = `SAQ${agora.getFullYear().toString().slice(-2)}${String(agora.getMonth() + 1).padStart(2, '0')}${String(agora.getDate()).padStart(2, '0')}${String(Object.keys(pedidosSaque).length + 1).padStart(3, '0')}`;
-                
+
+                console.log(`💰 INICIANDO SAQUE: ${referenciaSaque} para ${remetente} - ${quantidadeMB}MB`);
+
+                // Verificar se a referência já existe (proteção contra duplicatas)
+                if (pedidosSaque[referenciaSaque]) {
+                    console.error(`❌ ERRO CRÍTICO: Referência ${referenciaSaque} já existe!`);
+                    await message.reply(
+                        `❌ *ERRO TEMPORÁRIO*\n\n` +
+                        `⚠️ Ocorreu um erro ao gerar a referência.\n` +
+                        `🔄 Por favor, tente novamente em alguns segundos.`
+                    );
+                    return;
+                }
+
                 // Criar pedido
                 const pedido = {
                     referencia: referenciaSaque,
@@ -5032,9 +5182,10 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                     status: 'pendente',
                     grupo: message.from
                 };
-                
-                // Salvar pedido
+
+                // Salvar pedido ANTES de debitar
                 pedidosSaque[referenciaSaque] = pedido;
+                console.log(`✅ Pedido ${referenciaSaque} criado no sistema`);
 
                 // Debitar do saldo em todos os formatos
                 await atualizarSaldoBonus(remetente, (saldoObj) => {
@@ -5046,21 +5197,138 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                         data: agora.toISOString()
                     });
                 });
+                console.log(`✅ Saldo debitado: -${quantidadeMB}MB`);
 
                 // Salvar dados após criar saque
                 agendarSalvamento();
 
-                // Enviar para Tasker
-                try {
-                    await enviarParaTasker(referenciaSaque, quantidadeMB, numeroDestino, message.from, `SAQUE_BONUS_${message._data.notifyName || 'Cliente'}`);
-                } catch (error) {
-                    console.error('❌ Erro ao enviar saque para Tasker:', error);
-                }
-                
+                // Enviar para Tasker/Planilha com validação
                 const quantidadeFormatada = quantidadeMB >= 1024 ? `${(quantidadeMB/1024).toFixed(2)}GB` : `${quantidadeMB}MB`;
+                let resultadoEnvio;
+
+                try {
+                    console.log(`📊 Enviando saque ${referenciaSaque} para planilha...`);
+                    resultadoEnvio = await enviarParaTasker(
+                        referenciaSaque,
+                        quantidadeMB,
+                        numeroDestino,
+                        message.from,
+                        message._data.notifyName || 'Cliente'
+                    );
+
+                    // Verificar se o envio foi bem-sucedido
+                    if (!resultadoEnvio || !resultadoEnvio.sucesso) {
+                        console.error('❌ ERRO: Saque não foi enviado para a planilha!');
+                        console.error('Resultado:', resultadoEnvio);
+
+                        // Reverter o débito do saldo
+                        await atualizarSaldoBonus(remetente, (saldoObj) => {
+                            saldoObj.saldo += quantidadeMB;
+                            // Remover o último saque do histórico
+                            if (saldoObj.historicoSaques && saldoObj.historicoSaques.length > 0) {
+                                saldoObj.historicoSaques.pop();
+                            }
+                        });
+
+                        // Remover pedido da lista
+                        delete pedidosSaque[referenciaSaque];
+                        agendarSalvamento();
+
+                        await message.reply(
+                            `❌ *ERRO AO PROCESSAR SAQUE*\n\n` +
+                            `⚠️ Não foi possível enviar o pedido para a planilha.\n` +
+                            `💰 Seu saldo foi restaurado.\n` +
+                            `🔄 Por favor, tente novamente em alguns minutos.\n\n` +
+                            `📞 Se o problema persistir, contate o suporte.`
+                        );
+                        return;
+                    }
+
+                    console.log(`✅ Saque ${referenciaSaque} enviado com sucesso para a planilha!`);
+
+                    // Marcar pedido como enviado
+                    if (pedidosSaque[referenciaSaque]) {
+                        pedidosSaque[referenciaSaque].status = 'enviado';
+                        pedidosSaque[referenciaSaque].dataEnvio = new Date().toISOString();
+                        agendarSalvamento();
+                    }
+
+                } catch (error) {
+                    console.error('❌ EXCEÇÃO CRÍTICA ao enviar saque para planilha:', error);
+                    console.error('Stack:', error.stack);
+
+                    // Log detalhado para debug
+                    console.error(`📋 DETALHES DO ERRO:
+                        - Referência: ${referenciaSaque}
+                        - Cliente: ${remetente}
+                        - Quantidade: ${quantidadeMB}MB
+                        - Número Destino: ${numeroDestino}
+                        - Hora: ${new Date().toISOString()}
+                    `);
+
+                    // Reverter o débito do saldo em caso de erro
+                    console.log(`🔄 Revertendo débito de ${quantidadeMB}MB...`);
+                    await atualizarSaldoBonus(remetente, (saldoObj) => {
+                        saldoObj.saldo += quantidadeMB;
+                        // Remover o último saque do histórico
+                        if (saldoObj.historicoSaques && saldoObj.historicoSaques.length > 0) {
+                            saldoObj.historicoSaques.pop();
+                        }
+                    });
+
+                    // Marcar pedido como falhou antes de remover
+                    if (pedidosSaque[referenciaSaque]) {
+                        pedidosSaque[referenciaSaque].status = 'falhou';
+                        pedidosSaque[referenciaSaque].erroDetalhes = error.message;
+                        pedidosSaque[referenciaSaque].dataErro = new Date().toISOString();
+                    }
+
+                    // Remover pedido da lista
+                    delete pedidosSaque[referenciaSaque];
+                    agendarSalvamento();
+                    console.log(`✅ Saldo restaurado e pedido removido`);
+
+                    // Notificar o cliente
+                    await message.reply(
+                        `❌ *ERRO AO PROCESSAR SAQUE*\n\n` +
+                        `⚠️ Ocorreu um erro ao enviar o pedido para processamento.\n` +
+                        `💰 Seu saldo foi restaurado automaticamente.\n` +
+                        `🔄 Por favor, tente novamente em alguns minutos.\n\n` +
+                        `📞 Se o problema persistir, contate o suporte.\n` +
+                        `🔖 Ref. Erro: ${referenciaSaque}`
+                    );
+
+                    // Tentar notificar admin sobre falha crítica
+                    try {
+                        const grupoInfo = await client.getChatById(message.from);
+                        if (grupoInfo && grupoInfo.participants) {
+                            const admins = grupoInfo.participants.filter(p => p.isAdmin || p.isSuperAdmin);
+                            if (admins.length > 0) {
+                                const adminId = admins[0].id._serialized;
+                                await client.sendMessage(adminId,
+                                    `🚨 *ALERTA: FALHA NO SISTEMA DE SAQUE*\n\n` +
+                                    `❌ Um saque falhou ao ser enviado para a planilha.\n\n` +
+                                    `📋 *Detalhes:*\n` +
+                                    `🔖 Referência: ${referenciaSaque}\n` +
+                                    `👤 Cliente: ${message._data.notifyName || 'N/A'}\n` +
+                                    `💰 Valor: ${quantidadeMB}MB\n` +
+                                    `⚠️ Erro: ${error.message}\n\n` +
+                                    `✅ Saldo do cliente foi restaurado.\n` +
+                                    `🔧 Verifique a conexão com Google Sheets.`
+                                );
+                                console.log(`📧 Notificação enviada ao admin`);
+                            }
+                        }
+                    } catch (notifyError) {
+                        console.error('❌ Falha ao notificar admin:', notifyError.message);
+                    }
+
+                    return;
+                }
+
                 const saldoAtualizado = await buscarSaldoBonus(remetente);
                 const novoSaldo = saldoAtualizado ? saldoAtualizado.saldo : 0;
-                
+
                 await message.reply(
                     `✅ *SOLICITAÇÃO DE SAQUE CRIADA*\n\n` +
                     `👤 Cliente: ${message._data.notifyName || 'N/A'}\n` +
