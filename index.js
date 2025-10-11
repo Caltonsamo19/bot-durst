@@ -83,6 +83,9 @@ async function limparCacheWhatsApp(motivo = 'intervalo') {
         // Reinicializar cliente (reconecta sem perder autenticação)
         await client.initialize();
 
+        // Iniciar monitoramento de reconexão (4 minutos)
+        iniciarMonitoramentoReconexao();
+
         // A notificação de "BOT ONLINE" será enviada automaticamente
         // quando o evento 'ready' for disparado novamente
 
@@ -101,6 +104,10 @@ async function limparCacheWhatsApp(motivo = 'intervalo') {
 
 // Variável para controlar se deve notificar após reconexão
 let aguardandoNotificacaoReconexao = false;
+let timeoutReconexao = null;
+let tentativasReconexao = 0;
+const MAX_TENTATIVAS_RECONEXAO = 2;
+const TEMPO_LIMITE_RECONEXAO = 4 * 60 * 1000; // 4 minutos
 
 // Verificar se deve notificar após reconexão automática
 async function verificarNotificacaoReconexao() {
@@ -108,17 +115,88 @@ async function verificarNotificacaoReconexao() {
         if (aguardandoNotificacaoReconexao) {
             console.log('✅ Bot reconectado com sucesso após manutenção');
 
+            // Limpar timeout de monitoramento
+            if (timeoutReconexao) {
+                clearTimeout(timeoutReconexao);
+                timeoutReconexao = null;
+            }
+
             // Aguardar 3 segundos para garantir que o WhatsApp está estável
             await new Promise(resolve => setTimeout(resolve, 3000));
 
             const horaAtual = new Date().toLocaleTimeString('pt-BR');
-            await notificarGrupos(`✅ *BOT ONLINE*\n\n🎉 Manutenção concluída com sucesso!\n⏰ Horário: ${horaAtual}\n💚 Sistema otimizado e funcionando normalmente\n\n_Todos os serviços estão operacionais!_`);
+            const mensagemBase = `✅ *BOT ONLINE*\n\n🎉 Manutenção concluída com sucesso!\n⏰ Horário: ${horaAtual}\n💚 Sistema otimizado e funcionando normalmente`;
+
+            if (tentativasReconexao > 0) {
+                await notificarGrupos(`${mensagemBase}\n\n_Reconectado após ${tentativasReconexao} tentativa(s)_`);
+            } else {
+                await notificarGrupos(`${mensagemBase}\n\n_Todos os serviços estão operacionais!_`);
+            }
 
             aguardandoNotificacaoReconexao = false;
+            tentativasReconexao = 0;
         }
     } catch (error) {
         console.error('❌ Erro ao notificar reconexão:', error.message);
     }
+}
+
+// Função para tentar reconexão forçada
+async function tentarReconexaoForcada() {
+    try {
+        tentativasReconexao++;
+        console.log(`⚠️ Tentando reconexão forçada (tentativa ${tentativasReconexao}/${MAX_TENTATIVAS_RECONEXAO})...`);
+
+        // Notificar grupos sobre o retry
+        if (clienteGlobal) {
+            const horaAtual = new Date().toLocaleTimeString('pt-BR');
+            await notificarGrupos(`⚠️ *TENTANDO RECONECTAR*\n\n🔄 O bot está tentando reconectar (tentativa ${tentativasReconexao}/${MAX_TENTATIVAS_RECONEXAO})\n⏰ Horário: ${horaAtual}\n\n_Por favor, aguarde..._`).catch(() => {});
+        }
+
+        // Tentar destruir e reinicializar novamente
+        try {
+            await client.destroy();
+        } catch (e) {
+            console.log('Cliente já estava destruído');
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        await client.initialize();
+
+        // Configurar novo timeout de monitoramento
+        iniciarMonitoramentoReconexao();
+
+    } catch (error) {
+        console.error('❌ Erro na tentativa de reconexão forçada:', error.message);
+
+        if (tentativasReconexao >= MAX_TENTATIVAS_RECONEXAO) {
+            console.error('❌ FALHA CRÍTICA: Máximo de tentativas atingido!');
+            if (clienteGlobal) {
+                await notificarGrupos(`❌ *ERRO CRÍTICO*\n\n⚠️ O bot não conseguiu reconectar após ${MAX_TENTATIVAS_RECONEXAO} tentativas\n🔧 Por favor, verifique o servidor manualmente\n\n_Contate o administrador do sistema_`).catch(() => {});
+            }
+            aguardandoNotificacaoReconexao = false;
+            tentativasReconexao = 0;
+        } else {
+            // Tentar novamente após 4 minutos
+            console.log('⏰ Próxima tentativa em 4 minutos...');
+            setTimeout(tentarReconexaoForcada, TEMPO_LIMITE_RECONEXAO);
+        }
+    }
+}
+
+// Função para iniciar monitoramento de reconexão
+function iniciarMonitoramentoReconexao() {
+    if (timeoutReconexao) {
+        clearTimeout(timeoutReconexao);
+    }
+
+    timeoutReconexao = setTimeout(() => {
+        if (aguardandoNotificacaoReconexao) {
+            console.log('⚠️ Bot não reconectou dentro de 4 minutos. Iniciando retry...');
+            tentarReconexaoForcada();
+        }
+    }, TEMPO_LIMITE_RECONEXAO);
 }
 
 // Verificar se deve limpar nos horários fixos
@@ -5154,22 +5232,49 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                     return;
                 }
 
-                // Gerar referência do pedido
+                // === GERAR REFERÊNCIA ÚNICA PARA SAQUE ===
                 const agora = new Date();
-                const referenciaSaque = `SAQ${agora.getFullYear().toString().slice(-2)}${String(agora.getMonth() + 1).padStart(2, '0')}${String(agora.getDate()).padStart(2, '0')}${String(Object.keys(pedidosSaque).length + 1).padStart(3, '0')}`;
+                let referenciaSaque = null;
+                let tentativasGeracao = 0;
+                const maxTentativasGeracao = 10;
 
-                console.log(`💰 INICIANDO SAQUE: ${referenciaSaque} para ${remetente} - ${quantidadeMB}MB`);
+                // Tentar gerar referência única
+                while (!referenciaSaque && tentativasGeracao < maxTentativasGeracao) {
+                    tentativasGeracao++;
 
-                // Verificar se a referência já existe (proteção contra duplicatas)
-                if (pedidosSaque[referenciaSaque]) {
-                    console.error(`❌ ERRO CRÍTICO: Referência ${referenciaSaque} já existe!`);
+                    // Gerar referência baseada em data + contador + tentativa
+                    const anoMesDia = `${agora.getFullYear().toString().slice(-2)}${String(agora.getMonth() + 1).padStart(2, '0')}${String(agora.getDate()).padStart(2, '0')}`;
+                    const contador = String(Object.keys(pedidosSaque).length + tentativasGeracao).padStart(3, '0');
+                    const timestamp = String(Date.now()).slice(-3); // Últimos 3 dígitos do timestamp
+                    const refCandidato = `SAQ${anoMesDia}${contador}`;
+
+                    console.log(`🔄 Tentativa ${tentativasGeracao}: Gerando referência ${refCandidato}`);
+
+                    // Verificar se já existe localmente
+                    if (pedidosSaque[refCandidato]) {
+                        console.warn(`⚠️ Referência ${refCandidato} já existe localmente, tentando outra...`);
+                        continue;
+                    }
+
+                    // Verificar se já existe na planilha (fazer verificação prévia)
+                    // Por enquanto, aceitar se não existir localmente
+                    referenciaSaque = refCandidato;
+                    console.log(`✅ Referência gerada: ${referenciaSaque}`);
+                }
+
+                // Se não conseguiu gerar referência única após todas as tentativas
+                if (!referenciaSaque) {
+                    console.error(`❌ ERRO CRÍTICO: Não foi possível gerar referência única após ${maxTentativasGeracao} tentativas`);
                     await message.reply(
                         `❌ *ERRO TEMPORÁRIO*\n\n` +
-                        `⚠️ Ocorreu um erro ao gerar a referência.\n` +
-                        `🔄 Por favor, tente novamente em alguns segundos.`
+                        `⚠️ Ocorreu um erro ao gerar a referência do saque.\n` +
+                        `🔄 Por favor, tente novamente em alguns segundos.\n\n` +
+                        `📞 Se o problema persistir, contate o suporte.`
                     );
                     return;
                 }
+
+                console.log(`💰 INICIANDO SAQUE: ${referenciaSaque} para ${remetente} - ${quantidadeMB}MB`);
 
                 // Criar pedido
                 const pedido = {
@@ -5202,119 +5307,163 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                 // Salvar dados após criar saque
                 agendarSalvamento();
 
-                // Enviar para Tasker/Planilha com validação
+                // Enviar para Tasker/Planilha com validação e RETRY automático em caso de duplicata
                 const quantidadeFormatada = quantidadeMB >= 1024 ? `${(quantidadeMB/1024).toFixed(2)}GB` : `${quantidadeMB}MB`;
                 let resultadoEnvio;
+                let referenciaFinal = referenciaSaque;
+                let tentativasEnvio = 0;
+                const maxTentativasEnvio = 5;
 
-                try {
-                    console.log(`📊 Enviando saque ${referenciaSaque} para planilha...`);
-                    resultadoEnvio = await enviarParaTasker(
-                        referenciaSaque,
-                        quantidadeMB,
-                        numeroDestino,
-                        message.from,
-                        message._data.notifyName || 'Cliente'
-                    );
+                // Loop de retry com geração de nova referência em caso de duplicata
+                while (tentativasEnvio < maxTentativasEnvio) {
+                    tentativasEnvio++;
 
-                    // Verificar se o envio foi bem-sucedido
-                    if (!resultadoEnvio || !resultadoEnvio.sucesso) {
-                        console.error('❌ ERRO: Saque não foi enviado para a planilha!');
-                        console.error('Resultado:', resultadoEnvio);
-
-                        // Reverter o débito do saldo
-                        await atualizarSaldoBonus(remetente, (saldoObj) => {
-                            saldoObj.saldo += quantidadeMB;
-                            // Remover o último saque do histórico
-                            if (saldoObj.historicoSaques && saldoObj.historicoSaques.length > 0) {
-                                saldoObj.historicoSaques.pop();
-                            }
-                        });
-
-                        // Remover pedido da lista
-                        delete pedidosSaque[referenciaSaque];
-                        agendarSalvamento();
-
-                        await message.reply(
-                            `❌ *ERRO AO PROCESSAR SAQUE*\n\n` +
-                            `⚠️ Não foi possível enviar o pedido para a planilha.\n` +
-                            `💰 Seu saldo foi restaurado.\n` +
-                            `🔄 Por favor, tente novamente em alguns minutos.\n\n` +
-                            `📞 Se o problema persistir, contate o suporte.`
+                    try {
+                        console.log(`📊 Tentativa ${tentativasEnvio}/${maxTentativasEnvio}: Enviando saque ${referenciaFinal} para planilha...`);
+                        resultadoEnvio = await enviarParaTasker(
+                            referenciaFinal,
+                            quantidadeMB,
+                            numeroDestino,
+                            message.from,
+                            message._data.notifyName || 'Cliente'
                         );
-                        return;
+
+                        // === VERIFICAR SE É DUPLICATA NA PLANILHA ===
+                        if (resultadoEnvio && resultadoEnvio.duplicado) {
+                            console.warn(`⚠️ DUPLICATA DETECTADA na planilha: ${referenciaFinal} (Status: ${resultadoEnvio.status_existente})`);
+
+                            // Se está PROCESSADO, é realmente duplicata - reverter tudo
+                            if (resultadoEnvio.status_existente === 'PROCESSADO') {
+                                console.error(`❌ Saque ${referenciaFinal} já foi PROCESSADO anteriormente!`);
+
+                                // Reverter débito
+                                await atualizarSaldoBonus(remetente, (saldoObj) => {
+                                    saldoObj.saldo += quantidadeMB;
+                                    if (saldoObj.historicoSaques && saldoObj.historicoSaques.length > 0) {
+                                        saldoObj.historicoSaques.pop();
+                                    }
+                                });
+
+                                // Remover pedido
+                                delete pedidosSaque[referenciaFinal];
+                                agendarSalvamento();
+
+                                await message.reply(
+                                    `⚠️ *SAQUE JÁ PROCESSADO*\n\n` +
+                                    `🔖 Referência: ${referenciaFinal}\n` +
+                                    `📋 Status: ${resultadoEnvio.status_existente}\n\n` +
+                                    `✅ Este saque já foi processado anteriormente.\n` +
+                                    `💰 Seu saldo foi restaurado.\n\n` +
+                                    `📞 Se você não reconhece este saque, contate o suporte.`
+                                );
+                                return;
+                            }
+
+                            // Se está PENDENTE, gerar nova referência e tentar novamente
+                            console.log(`🔄 Gerando nova referência para evitar duplicata...`);
+
+                            // Remover pedido antigo
+                            delete pedidosSaque[referenciaFinal];
+
+                            // Gerar nova referência
+                            const novaRefSufixo = String(Date.now()).slice(-4); // Últimos 4 dígitos do timestamp
+                            const novaRef = `SAQ${agora.getFullYear().toString().slice(-2)}${String(agora.getMonth() + 1).padStart(2, '0')}${String(agora.getDate()).padStart(2, '0')}${novaRefSufixo}`;
+
+                            console.log(`🆕 Nova referência gerada: ${novaRef}`);
+                            referenciaFinal = novaRef;
+
+                            // Atualizar histórico com nova referência
+                            await atualizarSaldoBonus(remetente, (saldoObj) => {
+                                if (saldoObj.historicoSaques && saldoObj.historicoSaques.length > 0) {
+                                    saldoObj.historicoSaques[saldoObj.historicoSaques.length - 1].referencia = novaRef;
+                                }
+                            });
+
+                            // Criar novo pedido com nova referência
+                            pedidosSaque[novaRef] = {
+                                referencia: novaRef,
+                                cliente: remetente,
+                                nomeCliente: message._data.notifyName || 'N/A',
+                                quantidade: quantidadeMB,
+                                numeroDestino: numeroDestino,
+                                dataSolicitacao: agora.toISOString(),
+                                status: 'pendente',
+                                grupo: message.from
+                            };
+
+                            agendarSalvamento();
+                            console.log(`✅ Pedido recriado com nova referência: ${novaRef}`);
+
+                            // Continuar loop para tentar enviar com nova referência
+                            continue;
+                        }
+
+                        // === VERIFICAR SE O ENVIO FOI BEM-SUCEDIDO ===
+                        if (!resultadoEnvio || !resultadoEnvio.sucesso) {
+                            console.error('❌ ERRO: Saque não foi enviado para a planilha!');
+                            console.error('Resultado:', resultadoEnvio);
+
+                            // Se não for duplicata, não tentar novamente - sair do loop
+                            break;
+                        }
+
+                        // Sucesso! Sair do loop
+                        console.log(`✅ Saque ${referenciaFinal} enviado com sucesso!`);
+                        break;
+
+                    } catch (error) {
+                        console.error(`❌ Exceção na tentativa ${tentativasEnvio}:`, error.message);
+                        // Em caso de exceção, sair do loop
+                        break;
                     }
+                }
 
-                    console.log(`✅ Saque ${referenciaSaque} enviado com sucesso para a planilha!`);
+                // Após todas as tentativas, verificar resultado final
+                if (!resultadoEnvio || !resultadoEnvio.sucesso) {
+                    console.error('❌ FALHA FINAL: Saque não foi enviado após todas as tentativas');
+                    console.error('Resultado final:', resultadoEnvio);
 
-                    // Marcar pedido como enviado
-                    if (pedidosSaque[referenciaSaque]) {
-                        pedidosSaque[referenciaSaque].status = 'enviado';
-                        pedidosSaque[referenciaSaque].dataEnvio = new Date().toISOString();
-                        agendarSalvamento();
-                    }
-
-                } catch (error) {
-                    console.error('❌ EXCEÇÃO CRÍTICA ao enviar saque para planilha:', error);
-                    console.error('Stack:', error.stack);
-
-                    // Log detalhado para debug
-                    console.error(`📋 DETALHES DO ERRO:
-                        - Referência: ${referenciaSaque}
-                        - Cliente: ${remetente}
-                        - Quantidade: ${quantidadeMB}MB
-                        - Número Destino: ${numeroDestino}
-                        - Hora: ${new Date().toISOString()}
-                    `);
-
-                    // Reverter o débito do saldo em caso de erro
+                    // Reverter o débito do saldo
                     console.log(`🔄 Revertendo débito de ${quantidadeMB}MB...`);
                     await atualizarSaldoBonus(remetente, (saldoObj) => {
                         saldoObj.saldo += quantidadeMB;
-                        // Remover o último saque do histórico
                         if (saldoObj.historicoSaques && saldoObj.historicoSaques.length > 0) {
                             saldoObj.historicoSaques.pop();
                         }
                     });
 
-                    // Marcar pedido como falhou antes de remover
-                    if (pedidosSaque[referenciaSaque]) {
-                        pedidosSaque[referenciaSaque].status = 'falhou';
-                        pedidosSaque[referenciaSaque].erroDetalhes = error.message;
-                        pedidosSaque[referenciaSaque].dataErro = new Date().toISOString();
-                    }
-
                     // Remover pedido da lista
-                    delete pedidosSaque[referenciaSaque];
+                    delete pedidosSaque[referenciaFinal];
                     agendarSalvamento();
                     console.log(`✅ Saldo restaurado e pedido removido`);
 
-                    // Notificar o cliente
                     await message.reply(
                         `❌ *ERRO AO PROCESSAR SAQUE*\n\n` +
-                        `⚠️ Ocorreu um erro ao enviar o pedido para processamento.\n` +
-                        `💰 Seu saldo foi restaurado automaticamente.\n` +
+                        `⚠️ Não foi possível enviar o pedido para a planilha.\n` +
+                        `💰 Seu saldo foi restaurado.\n` +
                         `🔄 Por favor, tente novamente em alguns minutos.\n\n` +
                         `📞 Se o problema persistir, contate o suporte.\n` +
-                        `🔖 Ref. Erro: ${referenciaSaque}`
+                        `🔖 Ref: ${referenciaFinal}`
                     );
 
-                    // Tentar notificar admin sobre falha crítica
+                    // Tentar notificar admin
                     try {
                         const grupoInfo = await client.getChatById(message.from);
                         if (grupoInfo && grupoInfo.participants) {
                             const admins = grupoInfo.participants.filter(p => p.isAdmin || p.isSuperAdmin);
                             if (admins.length > 0) {
                                 const adminId = admins[0].id._serialized;
+                                const nomeClienteSeguro = sanitizeText(message._data.notifyName || 'N/A');
+
                                 await client.sendMessage(adminId,
                                     `🚨 *ALERTA: FALHA NO SISTEMA DE SAQUE*\n\n` +
-                                    `❌ Um saque falhou ao ser enviado para a planilha.\n\n` +
+                                    `❌ Saque falhou após ${tentativasEnvio} tentativas.\n\n` +
                                     `📋 *Detalhes:*\n` +
-                                    `🔖 Referência: ${referenciaSaque}\n` +
-                                    `👤 Cliente: ${message._data.notifyName || 'N/A'}\n` +
-                                    `💰 Valor: ${quantidadeMB}MB\n` +
-                                    `⚠️ Erro: ${error.message}\n\n` +
-                                    `✅ Saldo do cliente foi restaurado.\n` +
-                                    `🔧 Verifique a conexão com Google Sheets.`
+                                    `🔖 Referência: ${referenciaFinal}\n` +
+                                    `👤 Cliente: ${nomeClienteSeguro}\n` +
+                                    `💰 Valor: ${quantidadeMB}MB\n\n` +
+                                    `✅ Saldo restaurado.\n` +
+                                    `🔧 Verifique Google Sheets.`
                                 );
                                 console.log(`📧 Notificação enviada ao admin`);
                             }
@@ -5326,15 +5475,24 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                     return;
                 }
 
+                // Sucesso! Marcar pedido como enviado
+                console.log(`✅ Saque ${referenciaFinal} enviado com sucesso!`);
+                if (pedidosSaque[referenciaFinal]) {
+                    pedidosSaque[referenciaFinal].status = 'enviado';
+                    pedidosSaque[referenciaFinal].dataEnvio = new Date().toISOString();
+                    agendarSalvamento();
+                }
+
                 const saldoAtualizado = await buscarSaldoBonus(remetente);
                 const novoSaldo = saldoAtualizado ? saldoAtualizado.saldo : 0;
+                const nomeCliente = sanitizeText(message._data.notifyName || 'N/A');
 
                 await message.reply(
                     `✅ *SOLICITAÇÃO DE SAQUE CRIADA*\n\n` +
-                    `👤 Cliente: ${message._data.notifyName || 'N/A'}\n` +
+                    `👤 Cliente: ${nomeCliente}\n` +
                     `📱 Número: ${numeroDestino}\n` +
                     `💎 Quantidade: ${quantidadeFormatada}\n` +
-                    `🔖 Referência: *${referenciaSaque}*\n` +
+                    `🔖 Referência: *${referenciaFinal}*\n` +
                     `⏰ Processamento: até 24h\n\n` +
                     `💰 *Novo saldo:* ${novoSaldo}MB\n\n` +
                     `✅ Pedido enviado para processamento!\n` +
