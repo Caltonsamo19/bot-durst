@@ -1861,7 +1861,8 @@ let MAPEAMENTO_IDS = {
     '76991768342659@lid': '258870818180@c.us',  // Joãozinho - corrigido manualmente
     '216054655656152@lid': '258850401416@c.us', // Kelven Junior
     '85307059867830@lid': '258858891101@c.us',  // Isaac
-    '170725386272876@lid': '258865627840@c.us'  // Ercílio
+    '170725386272876@lid': '258865627840@c.us',  // Ercílio
+    '251032533737504@lid': '258874100607@c.us'  // Mr Durst
 };
 
 // === SISTEMA AUTOMÁTICO DE MAPEAMENTO LID ===
