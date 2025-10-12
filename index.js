@@ -6,23 +6,20 @@ const fssync = require('fs');
 const path = require('path');
 const axios = require('axios'); // npm install axios
 
-// === LIMPEZA AUTOMÁTICA DE CACHE ===
-const CACHE_DIR = path.join(__dirname, '.wwebjs_cache');
-const HORARIOS_FIXOS = [6, 12, 18, 21]; // Horários fixos para limpeza (6h, 12h, 18h e 21h)
-let ultimaLimpeza = new Date();
-let clienteGlobal = null; // Referência ao cliente para enviar notificações
+// === GERENCIAMENTO VIA PM2 ===
+// A limpeza de cache e reinicialização agora são feitas pelo PM2
+// através do script restart-bots.js
+
+// === SISTEMA DE NOTIFICAÇÕES DE REINICIALIZAÇÃO ===
+const ARQUIVO_SINAL_RESTART = path.join(__dirname, '.restart_signal.json');
 
 // Função para enviar notificação em todos os grupos
 async function notificarGrupos(mensagem) {
     try {
-        if (!clienteGlobal) {
-            console.log('⚠️ Cliente não disponível para notificações');
-            return;
-        }
-
-        // Importar CONFIGURACAO_GRUPOS dinamicamente ou usar a variável global
-        const chats = await clienteGlobal.getChats();
+        const chats = await client.getChats();
         const grupos = chats.filter(chat => chat.isGroup);
+
+        console.log(`📢 Enviando notificação para ${grupos.length} grupos...`);
 
         for (const grupo of grupos) {
             try {
@@ -38,194 +35,62 @@ async function notificarGrupos(mensagem) {
     }
 }
 
-// Função para limpar cache e reiniciar sessão (sem perder autenticação)
-async function limparCacheWhatsApp(motivo = 'intervalo') {
+// Verificar se há sinal para notificar antes de desligar
+async function verificarSinalRestart() {
     try {
-        console.log(`🧹 Iniciando limpeza da cache do WhatsApp (${motivo})...`);
+        if (fssync.existsSync(ARQUIVO_SINAL_RESTART)) {
+            const sinal = JSON.parse(await fs.readFile(ARQUIVO_SINAL_RESTART, 'utf-8'));
 
-        // Notificar grupos antes de desconectar
-        const horaAtual = new Date().toLocaleTimeString('pt-BR');
-        await notificarGrupos(`⚠️ *AVISO DE MANUTENÇÃO*\n\n🔧 O bot será reiniciado para manutenção preventiva\n⏱️ Horário: ${horaAtual}\n🎯 Objetivo: Manter o sistema rápido e saudável\n⏳ Tempo estimado: 30-60 segundos\n\n_Aguarde alguns instantes..._`);
+            if (sinal.tipo === 'pre-restart') {
+                console.log('🔔 Sinal de pré-reinicialização detectado!');
 
-        // Aguardar 3 segundos para garantir que as mensagens foram enviadas
-        await new Promise(resolve => setTimeout(resolve, 3000));
+                const horaAtual = new Date().toLocaleTimeString('pt-BR');
+                await notificarGrupos(`⚠️ *AVISO DE MANUTENÇÃO*\n\n🔧 O bot será reiniciado para manutenção preventiva\n⏱️ Horário: ${horaAtual}\n🎯 Objetivo: Manter o sistema rápido e saudável\n⏳ Tempo estimado: 1-2 minutos\n\n_Aguarde alguns instantes..._`);
 
-        // Marcar que está aguardando notificação após reconexão
-        aguardandoNotificacaoReconexao = true;
+                // Aguardar 3 segundos para garantir que as mensagens foram enviadas
+                await new Promise(resolve => setTimeout(resolve, 3000));
 
-        console.log('🔌 Desconectando cliente WhatsApp...');
+                // Marcar como notificado e aguardando restart
+                await fs.writeFile(ARQUIVO_SINAL_RESTART, JSON.stringify({
+                    tipo: 'aguardando-restart',
+                    horaNotificacao: new Date().toISOString()
+                }));
 
-        // Destruir a sessão atual (libera memória RAM e cache)
-        await client.destroy();
-
-        console.log('🧹 Limpando cache do disco...');
-
-        // Limpar cache do disco
-        if (fssync.existsSync(CACHE_DIR)) {
-            await fs.rm(CACHE_DIR, { recursive: true, force: true });
-            console.log('✅ Cache do disco limpa!');
-        }
-
-        // Forçar garbage collection se disponível (limpa memória RAM)
-        if (global.gc) {
-            global.gc();
-            console.log('♻️ Garbage collection executado!');
-        }
-
-        ultimaLimpeza = new Date();
-        console.log(`⏰ Última limpeza: ${ultimaLimpeza.toLocaleString('pt-BR')}`);
-
-        // Aguardar 2 segundos antes de reconectar
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        console.log('🔄 Reinicializando cliente WhatsApp...');
-
-        // Reinicializar cliente (reconecta sem perder autenticação)
-        await client.initialize();
-
-        // Iniciar monitoramento de reconexão (4 minutos)
-        iniciarMonitoramentoReconexao();
-
-        // A notificação de "BOT ONLINE" será enviada automaticamente
-        // quando o evento 'ready' for disparado novamente
-
-    } catch (error) {
-        console.error('❌ Erro ao limpar cache e reiniciar sessão:', error.message);
-
-        // Tentar reinicializar mesmo se houver erro
-        try {
-            console.log('⚠️ Tentando reinicializar cliente após erro...');
-            await client.initialize();
-        } catch (retryError) {
-            console.error('❌ Falha crítica ao reinicializar:', retryError.message);
-        }
-    }
-}
-
-// Variável para controlar se deve notificar após reconexão
-let aguardandoNotificacaoReconexao = false;
-let timeoutReconexao = null;
-let tentativasReconexao = 0;
-const MAX_TENTATIVAS_RECONEXAO = 2;
-const TEMPO_LIMITE_RECONEXAO = 4 * 60 * 1000; // 4 minutos
-
-// Verificar se deve notificar após reconexão automática
-async function verificarNotificacaoReconexao() {
-    try {
-        if (aguardandoNotificacaoReconexao) {
-            console.log('✅ Bot reconectado com sucesso após manutenção');
-
-            // Limpar timeout de monitoramento
-            if (timeoutReconexao) {
-                clearTimeout(timeoutReconexao);
-                timeoutReconexao = null;
+                console.log('✅ Grupos notificados, aguardando PM2 reiniciar...');
             }
-
-            // Aguardar 3 segundos para garantir que o WhatsApp está estável
-            await new Promise(resolve => setTimeout(resolve, 3000));
-
-            const horaAtual = new Date().toLocaleTimeString('pt-BR');
-            const mensagemBase = `✅ *BOT ONLINE*\n\n🎉 Manutenção concluída com sucesso!\n⏰ Horário: ${horaAtual}\n💚 Sistema otimizado e funcionando normalmente`;
-
-            if (tentativasReconexao > 0) {
-                await notificarGrupos(`${mensagemBase}\n\n_Reconectado após ${tentativasReconexao} tentativa(s)_`);
-            } else {
-                await notificarGrupos(`${mensagemBase}\n\n_Todos os serviços estão operacionais!_`);
-            }
-
-            aguardandoNotificacaoReconexao = false;
-            tentativasReconexao = 0;
         }
     } catch (error) {
-        console.error('❌ Erro ao notificar reconexão:', error.message);
+        console.error('❌ Erro ao verificar sinal de restart:', error.message);
     }
 }
 
-// Função para tentar reconexão forçada
-async function tentarReconexaoForcada() {
+// Verificar se acabou de reiniciar e notificar
+async function verificarPosRestart() {
     try {
-        tentativasReconexao++;
-        console.log(`⚠️ Tentando reconexão forçada (tentativa ${tentativasReconexao}/${MAX_TENTATIVAS_RECONEXAO})...`);
+        if (fssync.existsSync(ARQUIVO_SINAL_RESTART)) {
+            const sinal = JSON.parse(await fs.readFile(ARQUIVO_SINAL_RESTART, 'utf-8'));
 
-        // Notificar grupos sobre o retry
-        if (clienteGlobal) {
-            const horaAtual = new Date().toLocaleTimeString('pt-BR');
-            await notificarGrupos(`⚠️ *TENTANDO RECONECTAR*\n\n🔄 O bot está tentando reconectar (tentativa ${tentativasReconexao}/${MAX_TENTATIVAS_RECONEXAO})\n⏰ Horário: ${horaAtual}\n\n_Por favor, aguarde..._`).catch(() => {});
-        }
+            if (sinal.tipo === 'aguardando-restart') {
+                console.log('✅ Bot reiniciado! Notificando grupos...');
 
-        // Tentar destruir e reinicializar novamente
-        try {
-            await client.destroy();
-        } catch (e) {
-            console.log('Cliente já estava destruído');
-        }
+                // Aguardar 5 segundos para garantir que o WhatsApp está conectado
+                await new Promise(resolve => setTimeout(resolve, 5000));
 
-        await new Promise(resolve => setTimeout(resolve, 3000));
+                const horaAtual = new Date().toLocaleTimeString('pt-BR');
+                await notificarGrupos(`✅ *BOT ONLINE*\n\n🎉 Manutenção concluída com sucesso!\n⏰ Horário: ${horaAtual}\n💚 Sistema otimizado e funcionando normalmente\n\n_Todos os serviços estão operacionais!_`);
 
-        await client.initialize();
-
-        // Configurar novo timeout de monitoramento
-        iniciarMonitoramentoReconexao();
-
-    } catch (error) {
-        console.error('❌ Erro na tentativa de reconexão forçada:', error.message);
-
-        if (tentativasReconexao >= MAX_TENTATIVAS_RECONEXAO) {
-            console.error('❌ FALHA CRÍTICA: Máximo de tentativas atingido!');
-            if (clienteGlobal) {
-                await notificarGrupos(`❌ *ERRO CRÍTICO*\n\n⚠️ O bot não conseguiu reconectar após ${MAX_TENTATIVAS_RECONEXAO} tentativas\n🔧 Por favor, verifique o servidor manualmente\n\n_Contate o administrador do sistema_`).catch(() => {});
+                // Remover arquivo de sinal
+                await fs.unlink(ARQUIVO_SINAL_RESTART);
+                console.log('✅ Grupos notificados sobre reconexão!');
             }
-            aguardandoNotificacaoReconexao = false;
-            tentativasReconexao = 0;
-        } else {
-            // Tentar novamente após 4 minutos
-            console.log('⏰ Próxima tentativa em 4 minutos...');
-            setTimeout(tentarReconexaoForcada, TEMPO_LIMITE_RECONEXAO);
         }
+    } catch (error) {
+        console.error('❌ Erro ao verificar pós-restart:', error.message);
     }
 }
 
-// Função para iniciar monitoramento de reconexão
-function iniciarMonitoramentoReconexao() {
-    if (timeoutReconexao) {
-        clearTimeout(timeoutReconexao);
-    }
-
-    timeoutReconexao = setTimeout(() => {
-        if (aguardandoNotificacaoReconexao) {
-            console.log('⚠️ Bot não reconectou dentro de 4 minutos. Iniciando retry...');
-            tentarReconexaoForcada();
-        }
-    }, TEMPO_LIMITE_RECONEXAO);
-}
-
-// Verificar se deve limpar nos horários fixos
-function verificarHorarioFixo() {
-    const agora = new Date();
-    const horaAtual = agora.getHours();
-    const minutoAtual = agora.getMinutes();
-
-    // Verifica se está em um horário fixo e se já não limpou nesta hora
-    if (HORARIOS_FIXOS.includes(horaAtual) && minutoAtual === 0) {
-        const ultimaHora = ultimaLimpeza.getHours();
-        const ultimaData = ultimaLimpeza.toDateString();
-        const dataAtual = agora.toDateString();
-
-        // Só limpa se não limpou nesta hora hoje
-        if (!(ultimaHora === horaAtual && ultimaData === dataAtual)) {
-            limparCacheWhatsApp(`horário fixo ${horaAtual}h`);
-        }
-    }
-}
-
-// Agendar limpeza automática
-function iniciarLimpezaAutomatica() {
-    console.log('⚙️ Limpeza automática de cache ativada:');
-    console.log('   - Horários fixos: 6:00, 12:00, 18:00 e 21:00');
-
-    // Verificar horários fixos a cada minuto
-    setInterval(verificarHorarioFixo, 60 * 1000);
-}
+// Verificar sinais periodicamente (a cada 10 segundos)
+setInterval(verificarSinalRestart, 10000);
 
 // === AXIOS SIMPLIFICADO (SEGUINDO PADRÃO BOT1) ===
 const axiosInstance = axios.create({
@@ -2942,16 +2807,8 @@ client.on('ready', async () => {
     console.log(`🔗 URL: ${GOOGLE_SHEETS_CONFIG.scriptUrl}`);
     console.log('🤖 Bot Retalho - Lógica simples igual ao Bot Atacado!');
 
-    // Configurar cliente global para notificações
-    clienteGlobal = client;
-
-    // Verificar se deve notificar após reconexão automática
-    await verificarNotificacaoReconexao();
-
-    // Iniciar limpeza automática de cache (só na primeira vez)
-    if (!aguardandoNotificacaoReconexao) {
-        iniciarLimpezaAutomatica();
-    }
+    // Verificar se acabou de reiniciar e notificar grupos
+    await verificarPosRestart();
 
     // Carregar mapeamentos LID salvos
     await carregarMapeamentos();
@@ -4179,158 +4036,13 @@ async function processMessage(message) {
                     }
                 }
 
-                // === COMANDOS DE RELATÓRIOS ===
+                // === COMANDOS DE RELATÓRIOS ANTIGOS (DESATIVADOS - USAR NOVOS ABAIXO) ===
 
-                // .config-relatorio GRUPO_ID NUMERO - Configurar número para relatórios (ADMIN APENAS)
-                if (comando.startsWith('.config-relatorio ')) {
-                    if (!isAdmin) {
-                        await message.reply('❌ Apenas administradores podem usar este comando!');
-                        return;
-                    }
-
-                    const parametros = comando.split(' ');
-                    if (parametros.length < 3) {
-                        await message.reply(
-                            `❌ *FORMATO INCORRETO*\n\n` +
-                            `✅ Use: *.config-relatorio GRUPO_ID NUMERO*\n\n` +
-                            `📋 **Exemplos:**\n` +
-                            `• *.config-relatorio 258820749141-1441573529@g.us 258847123456*\n\n` +
-                            `💡 **Para obter ID do grupo:**\n` +
-                            `Use: *.grupo_atual*`
-                        );
-                        return;
-                    }
-
-                    const grupoId = parametros[1];
-                    let numeroRelatorio = parametros[2];
-
-                    // Validar número
-                    if (!/^\d{9}$/.test(numeroRelatorio) && !/^\d{12}$/.test(numeroRelatorio)) {
-                        await message.reply(
-                            `❌ *NÚMERO INVÁLIDO*\n\n` +
-                            `✅ Use formato de 9 ou 12 dígitos:\n` +
-                            `• 847123456 (9 dígitos)\n` +
-                            `• 258847123456 (12 dígitos)`
-                        );
-                        return;
-                    }
-
-                    // Converter para formato completo se necessário
-                    if (numeroRelatorio.length === 9) {
-                        numeroRelatorio = '258' + numeroRelatorio;
-                    }
-
-                    // Configurar no sistema de relatórios
-                    if (global.sistemaRelatorios) {
-                        global.sistemaRelatorios.configurarNumeroRelatorio(grupoId, numeroRelatorio);
-
-                        await message.reply(
-                            `✅ *CONFIGURAÇÃO SALVA*\n\n` +
-                            `📱 Grupo: ${grupoId.split('@')[0]}\n` +
-                            `📞 Número para relatórios: ${numeroRelatorio}\n` +
-                            `⏰ Relatórios às 22:00 diariamente\n\n` +
-                            `💡 Teste com: *.test-relatorio*`
-                        );
-                    } else {
-                        await message.reply('❌ Sistema de relatórios não está disponível');
-                    }
-                    return;
-                }
-
-                // .list-relatorios - Listar configurações de relatórios (ADMIN APENAS)
-                if (comando === '.list-relatorios') {
-                    if (!isAdmin) {
-                        await message.reply('❌ Apenas administradores podem usar este comando!');
-                        return;
-                    }
-
-                    if (global.sistemaRelatorios) {
-                        const configs = global.sistemaRelatorios.numerosRelatorio;
-                        if (Object.keys(configs).length === 0) {
-                            await message.reply(
-                                `📋 *CONFIGURAÇÕES DE RELATÓRIOS*\n\n` +
-                                `❌ Nenhum grupo configurado\n\n` +
-                                `💡 Configure com: *.config-relatorio*`
-                            );
-                        } else {
-                            let texto = `📋 *CONFIGURAÇÕES DE RELATÓRIOS*\n\n`;
-
-                            for (const [grupoId, numero] of Object.entries(configs)) {
-                                const grupoNome = grupoId.split('@')[0];
-                                texto += `📱 ${grupoNome}\n`;
-                                texto += `   📞 ${numero}\n\n`;
-                            }
-
-                            texto += `⏰ Horário: 22:00 diariamente\n`;
-                            texto += `🧪 Teste: *.test-relatorio*`;
-
-                            await message.reply(texto);
-                        }
-                    } else {
-                        await message.reply('❌ Sistema de relatórios não está disponível');
-                    }
-                    return;
-                }
-
-                // .remove-relatorio GRUPO_ID - Remover configuração de relatórios (ADMIN APENAS)
-                if (comando.startsWith('.remove-relatorio ')) {
-                    if (!isAdmin) {
-                        await message.reply('❌ Apenas administradores podem usar este comando!');
-                        return;
-                    }
-
-                    const grupoId = comando.split(' ')[1];
-                    if (!grupoId) {
-                        await message.reply(
-                            `❌ *FORMATO INCORRETO*\n\n` +
-                            `✅ Use: *.remove-relatorio GRUPO_ID*\n` +
-                            `💡 Liste os grupos com: *.list-relatorios*`
-                        );
-                        return;
-                    }
-
-                    if (global.sistemaRelatorios) {
-                        global.sistemaRelatorios.removerNumeroRelatorio(grupoId);
-                        await message.reply(
-                            `✅ *CONFIGURAÇÃO REMOVIDA*\n\n` +
-                            `📱 Grupo: ${grupoId.split('@')[0]}\n` +
-                            `❌ Relatórios desativados para este grupo`
-                        );
-                    } else {
-                        await message.reply('❌ Sistema de relatórios não está disponível');
-                    }
-                    return;
-                }
-
-                // .test-relatorio [GRUPO_ID] - Testar relatório (ADMIN APENAS)
-                if (comando.startsWith('.test-relatorio')) {
-                    if (!isAdmin) {
-                        await message.reply('❌ Apenas administradores podem usar este comando!');
-                        return;
-                    }
-
-                    if (!global.sistemaRelatorios) {
-                        await message.reply('❌ Sistema de relatórios não está disponível');
-                        return;
-                    }
-
-                    const parametros = comando.split(' ');
-                    const grupoId = parametros[1] || message.from; // Usar grupo atual se não especificado
-
-                    await message.reply(
-                        `🧪 *TESTE DE RELATÓRIOS*\n\n` +
-                        `📊 Gerando relatório de teste...\n` +
-                        `⏳ Aguarde alguns segundos...`
-                    );
-
-                    try {
-                        await global.sistemaRelatorios.testarRelatorio(grupoId);
-                        await message.reply('✅ Teste concluído! Verifique se o relatório foi enviado.');
-                    } catch (error) {
-                        await message.reply(`❌ Erro no teste: ${error.message}`);
-                    }
-                    return;
-                }
+                // COMANDOS ANTIGOS REMOVIDOS - Usar novos comandos mais abaixo (linha ~4405+)
+                // Os novos comandos suportam:
+                // - Preço de revenda personalizado por grupo (16-18 MT/GB)
+                // - Cálculo automático de lucro
+                // - Configuração mais simples (sem precisar do GRUPO_ID)
             }
 
             // === COMANDOS GOOGLE SHEETS ===
@@ -4462,25 +4174,62 @@ async function processMessage(message) {
 
             // === COMANDO PARA CONFIGURAR NÚMERO DE RELATÓRIO ===
             if (message.body.startsWith('.config-relatorio ')) {
-                const args = message.body.replace('.config-relatorio ', '').trim().split(' ');
+                console.log(`\n======= DEBUG CONFIG-RELATORIO =======`);
+                console.log(`📥 Mensagem completa: "${message.body}"`);
+
+                const textoSemComando = message.body.replace('.config-relatorio ', '');
+                console.log(`📝 Texto sem comando: "${textoSemComando}"`);
+
+                const args = textoSemComando.trim().split(/\s+/);
+                console.log(`📋 Args array:`, args);
+                console.log(`📋 Args[0]: "${args[0]}" (type: ${typeof args[0]})`);
+                console.log(`📋 Args[1]: "${args[1]}" (type: ${typeof args[1]})`);
+
                 const numeroInput = args[0];
                 const precoRevenda = args[1] ? parseFloat(args[1]) : 16;
 
+                console.log(`\n🔍 VALIDAÇÕES:`);
+                console.log(`  numeroInput = "${numeroInput}"`);
+                console.log(`  length = ${numeroInput ? numeroInput.length : 0}`);
+                console.log(`  precoRevenda = ${precoRevenda}`);
+                console.log(`  startsWith('258') = ${numeroInput ? numeroInput.startsWith('258') : false}`);
+
                 // Validar formato do número (deve começar com 258 e ter 12 dígitos)
-                if (!numeroInput.startsWith('258') || numeroInput.length !== 12) {
-                    await message.reply(`❌ *Número inválido!*\n\n✅ *Formato correto:* 258XXXXXXXXX PREÇO\n\n📝 *Exemplos:*\n\`.config-relatorio 258847123456 16\` (16 MT/GB)\n\`.config-relatorio 258847123456 17\` (17 MT/GB)\n\`.config-relatorio 258847123456 18\` (18 MT/GB)\n\n⚠️ Se não especificar preço, será usado 16 MT/GB`);
+                const numeroLimpo = numeroInput ? numeroInput.trim() : '';
+                const apenasDigitos = /^\d+$/.test(numeroLimpo);
+
+                console.log(`  numeroLimpo = "${numeroLimpo}"`);
+                console.log(`  apenasDigitos = ${apenasDigitos}`);
+                console.log(`  numeroLimpo.length = ${numeroLimpo.length}`);
+                console.log(`  numeroLimpo.startsWith('258') = ${numeroLimpo.startsWith('258')}`);
+
+                console.log(`\n✅ CHECKS:`);
+                console.log(`  !numeroLimpo = ${!numeroLimpo}`);
+                console.log(`  !numeroLimpo.startsWith('258') = ${!numeroLimpo.startsWith('258')}`);
+                console.log(`  numeroLimpo.length !== 12 = ${numeroLimpo.length !== 12}`);
+                console.log(`  !apenasDigitos = ${!apenasDigitos}`);
+                console.log(`======================================\n`);
+
+                if (!numeroLimpo || !numeroLimpo.startsWith('258') || numeroLimpo.length !== 12 || !apenasDigitos) {
+                    let motivoErro = [];
+                    if (!numeroLimpo) motivoErro.push('número vazio');
+                    if (numeroLimpo && !numeroLimpo.startsWith('258')) motivoErro.push('não começa com 258');
+                    if (numeroLimpo && numeroLimpo.length !== 12) motivoErro.push(`tem ${numeroLimpo.length} dígitos (esperado: 12)`);
+                    if (numeroLimpo && !apenasDigitos) motivoErro.push('contém caracteres não numéricos');
+
+                    await message.reply(`❌ *Número inválido!*\n\n🔍 *Motivo:* ${motivoErro.join(', ')}\n\n✅ *Formato correto:* 258XXXXXXXXX PREÇO\n\n📝 *Exemplos:*\n\`.config-relatorio 258847123456 17\`\n\`.config-relatorio 258852118624 16\`\n\n📊 *Debug info:*\nSeu número: "${numeroInput}"\nLength: ${numeroInput ? numeroInput.length : 0}\nApenas dígitos: ${apenasDigitos}`);
                     return;
                 }
 
                 // Validar preço de revenda (16-18 MT/GB)
-                if (precoRevenda < 16 || precoRevenda > 18) {
-                    await message.reply(`❌ *Preço inválido!*\n\n✅ O preço deve estar entre 16 e 18 MT/GB\n\n📝 *Exemplo:* \`.config-relatorio 258847123456 17\``);
+                if (isNaN(precoRevenda) || precoRevenda < 16 || precoRevenda > 18) {
+                    await message.reply(`❌ *Preço inválido!*\n\n✅ O preço deve estar entre 16 e 18 MT/GB\n\n📝 *Exemplo:* \`.config-relatorio 258847123456 17\`\n\n📊 *Seu preço:* ${precoRevenda}`);
                     return;
                 }
 
                 // Validar se o número existe no mapeamento
-                if (!global.sistemaRelatorios.validarNumeroNoMapeamento(numeroInput, MAPEAMENTO_IDS)) {
-                    await message.reply(`❌ *Número não encontrado no mapeamento!*\n\n⚠️ O número ${numeroInput} não está registrado no sistema.\n\n💡 Apenas números mapeados podem receber relatórios.`);
+                if (!global.sistemaRelatorios.validarNumeroNoMapeamento(numeroLimpo, MAPEAMENTO_IDS)) {
+                    await message.reply(`❌ *Número não encontrado no mapeamento!*\n\n⚠️ O número ${numeroLimpo} não está registrado no sistema.\n\n💡 Apenas números mapeados podem receber relatórios.`);
                     return;
                 }
 
@@ -4489,9 +4238,9 @@ async function processMessage(message) {
                     const grupoNome = chat.name || 'Grupo';
                     const grupoId = message.from;
 
-                    await global.sistemaRelatorios.configurarNumeroRelatorio(grupoId, numeroInput, grupoNome, precoRevenda);
+                    await global.sistemaRelatorios.configurarNumeroRelatorio(grupoId, numeroLimpo, grupoNome, precoRevenda);
 
-                    await message.reply(`✅ *Relatórios configurados com sucesso!*\n\n📊 **Grupo:** ${grupoNome}\n📱 **Número:** ${numeroInput}\n💸 **Preço revenda:** ${precoRevenda} MT/GB\n💰 **Lucro por GB:** ${precoRevenda - 12} MT\n\n🕙 Relatórios diários serão enviados às 22:00\n\n💬 Uma mensagem de confirmação foi enviada para o número configurado.`);
+                    await message.reply(`✅ *Relatórios configurados com sucesso!*\n\n📊 **Grupo:** ${grupoNome}\n📱 **Número:** ${numeroInput}\n\n🕙 Relatórios diários serão enviados às 22:00\n\n💬 Uma mensagem de confirmação com detalhes foi enviada para o número configurado.`);
 
                     console.log(`✅ Admin configurou relatórios do grupo ${grupoNome} para ${numeroInput} - Preço: ${precoRevenda} MT/GB`);
                 } catch (error) {
@@ -5292,6 +5041,10 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                 pedidosSaque[referenciaSaque] = pedido;
                 console.log(`✅ Pedido ${referenciaSaque} criado no sistema`);
 
+                // === SALVAMENTO IMEDIATO #1: PEDIDO CRIADO ===
+                console.log(`💾 Salvando pedido de saque imediatamente...`);
+                await salvarDadosReferencia();
+
                 // Debitar do saldo em todos os formatos
                 await atualizarSaldoBonus(remetente, (saldoObj) => {
                     saldoObj.saldo -= quantidadeMB;
@@ -5304,8 +5057,9 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                 });
                 console.log(`✅ Saldo debitado: -${quantidadeMB}MB`);
 
-                // Salvar dados após criar saque
-                agendarSalvamento();
+                // === SALVAMENTO IMEDIATO #2: SALDO DEBITADO ===
+                console.log(`💾 Salvando saldo atualizado imediatamente...`);
+                await salvarDadosReferencia();
 
                 // Enviar para Tasker/Planilha com validação e RETRY automático em caso de duplicata
                 const quantidadeFormatada = quantidadeMB >= 1024 ? `${(quantidadeMB/1024).toFixed(2)}GB` : `${quantidadeMB}MB`;
@@ -5332,35 +5086,8 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                         if (resultadoEnvio && resultadoEnvio.duplicado) {
                             console.warn(`⚠️ DUPLICATA DETECTADA na planilha: ${referenciaFinal} (Status: ${resultadoEnvio.status_existente})`);
 
-                            // Se está PROCESSADO, é realmente duplicata - reverter tudo
-                            if (resultadoEnvio.status_existente === 'PROCESSADO') {
-                                console.error(`❌ Saque ${referenciaFinal} já foi PROCESSADO anteriormente!`);
-
-                                // Reverter débito
-                                await atualizarSaldoBonus(remetente, (saldoObj) => {
-                                    saldoObj.saldo += quantidadeMB;
-                                    if (saldoObj.historicoSaques && saldoObj.historicoSaques.length > 0) {
-                                        saldoObj.historicoSaques.pop();
-                                    }
-                                });
-
-                                // Remover pedido
-                                delete pedidosSaque[referenciaFinal];
-                                agendarSalvamento();
-
-                                await message.reply(
-                                    `⚠️ *SAQUE JÁ PROCESSADO*\n\n` +
-                                    `🔖 Referência: ${referenciaFinal}\n` +
-                                    `📋 Status: ${resultadoEnvio.status_existente}\n\n` +
-                                    `✅ Este saque já foi processado anteriormente.\n` +
-                                    `💰 Seu saldo foi restaurado.\n\n` +
-                                    `📞 Se você não reconhece este saque, contate o suporte.`
-                                );
-                                return;
-                            }
-
-                            // Se está PENDENTE, gerar nova referência e tentar novamente
-                            console.log(`🔄 Gerando nova referência para evitar duplicata...`);
+                            // Gerar nova referência independente do status
+                            console.log(`🔄 Gerando nova referência para evitar duplicata (Status: ${resultadoEnvio.status_existente})...`);
 
                             // Remover pedido antigo
                             delete pedidosSaque[referenciaFinal];
@@ -5391,8 +5118,11 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                                 grupo: message.from
                             };
 
-                            agendarSalvamento();
                             console.log(`✅ Pedido recriado com nova referência: ${novaRef}`);
+
+                            // === SALVAMENTO IMEDIATO #5: NOVA REFERÊNCIA GERADA ===
+                            console.log(`💾 Salvando nova referência imediatamente...`);
+                            await salvarDadosReferencia();
 
                             // Continuar loop para tentar enviar com nova referência
                             continue;
@@ -5434,8 +5164,11 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
 
                     // Remover pedido da lista
                     delete pedidosSaque[referenciaFinal];
-                    agendarSalvamento();
                     console.log(`✅ Saldo restaurado e pedido removido`);
+
+                    // === SALVAMENTO IMEDIATO #4: REVERSÃO DE SALDO ===
+                    console.log(`💾 Salvando reversão de saldo imediatamente...`);
+                    await salvarDadosReferencia();
 
                     await message.reply(
                         `❌ *ERRO AO PROCESSAR SAQUE*\n\n` +
@@ -5480,24 +5213,59 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                 if (pedidosSaque[referenciaFinal]) {
                     pedidosSaque[referenciaFinal].status = 'enviado';
                     pedidosSaque[referenciaFinal].dataEnvio = new Date().toISOString();
-                    agendarSalvamento();
+
+                    // === SALVAMENTO IMEDIATO #3: PEDIDO ENVIADO ===
+                    console.log(`💾 Salvando status 'enviado' imediatamente...`);
+                    await salvarDadosReferencia();
                 }
 
-                const saldoAtualizado = await buscarSaldoBonus(remetente);
-                const novoSaldo = saldoAtualizado ? saldoAtualizado.saldo : 0;
-                const nomeCliente = sanitizeText(message._data.notifyName || 'N/A');
+                // Enviar mensagem de confirmação ao cliente
+                try {
+                    const saldoAtualizado = await buscarSaldoBonus(remetente);
+                    const novoSaldo = saldoAtualizado ? saldoAtualizado.saldo : 0;
 
-                await message.reply(
-                    `✅ *SOLICITAÇÃO DE SAQUE CRIADA*\n\n` +
-                    `👤 Cliente: ${nomeCliente}\n` +
-                    `📱 Número: ${numeroDestino}\n` +
-                    `💎 Quantidade: ${quantidadeFormatada}\n` +
-                    `🔖 Referência: *${referenciaFinal}*\n` +
-                    `⏰ Processamento: até 24h\n\n` +
-                    `💰 *Novo saldo:* ${novoSaldo}MB\n\n` +
-                    `✅ Pedido enviado para processamento!\n` +
-                    `✅ Obrigado por usar nosso sistema de referências!`
-                );
+                    // Sanitizar nome do cliente (fallback para nome original se falhar)
+                    let nomeCliente = message._data.notifyName || 'N/A';
+                    try {
+                        nomeCliente = sanitizeText(nomeCliente);
+                    } catch (e) {
+                        console.warn('⚠️ Erro ao sanitizar nome, usando original');
+                    }
+
+                    const mensagemSucesso = `✅ *SOLICITAÇÃO DE SAQUE CRIADA*\n\n` +
+                        `👤 Cliente: ${nomeCliente}\n` +
+                        `📱 Número: ${numeroDestino}\n` +
+                        `💎 Quantidade: ${quantidadeFormatada}\n` +
+                        `🔖 Referência: *${referenciaFinal}*\n` +
+                        `⏰ Processamento: até 24h\n\n` +
+                        `💰 *Novo saldo:* ${novoSaldo}MB\n\n` +
+                        `✅ Pedido enviado para processamento!\n` +
+                        `✅ Obrigado por usar nosso sistema de referências!`;
+
+                    console.log(`📤 Enviando confirmação de saque no GRUPO...`);
+
+                    // Enviar no GRUPO (reply na mensagem original)
+                    await message.reply(mensagemSucesso);
+                    console.log(`✅ Confirmação de saque enviada no GRUPO com sucesso!`);
+
+                } catch (errorMensagem) {
+                    console.error('❌ ERRO ao enviar mensagem de confirmação:', errorMensagem);
+                    console.error('Stack:', errorMensagem.stack);
+
+                    // Tentar enviar versão simplificada
+                    try {
+                        await client.sendMessage(message.from,
+                            `✅ *SAQUE CRIADO*\n\n` +
+                            `🔖 Referência: ${referenciaFinal}\n` +
+                            `💎 Quantidade: ${quantidadeFormatada}\n` +
+                            `📱 Número: ${numeroDestino}\n\n` +
+                            `✅ Pedido em processamento!`
+                        );
+                        console.log(`✅ Mensagem simplificada enviada`);
+                    } catch (errorSimples) {
+                        console.error('❌ Falha também na mensagem simplificada:', errorSimples.message);
+                    }
+                }
                 return;
             }
         }

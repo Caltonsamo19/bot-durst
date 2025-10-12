@@ -68,6 +68,8 @@ class SistemaRelatorios {
     async configurarNumeroRelatorio(grupoId, numeroRelatorio, grupoNome = 'Grupo', precoRevenda = 16) {
         this.numerosRelatorio[grupoId] = numeroRelatorio;
         this.precosRevenda[grupoId] = precoRevenda;
+        console.log(`💾 DEBUG: Salvando - Grupo: ${grupoId}, Preço: ${precoRevenda} MT/GB`);
+        console.log(`💾 DEBUG: precosRevenda objeto:`, this.precosRevenda);
         await this.salvarConfiguracoes();
         console.log(`✅ Configurado relatório do grupo ${grupoNome} (${grupoId}) para ${numeroRelatorio} - Preço: ${precoRevenda} MT/GB`);
 
@@ -449,6 +451,7 @@ class SistemaRelatorios {
 
             // Buscar preço de revenda do grupo (padrão 16 MT/GB)
             const precoRevenda = this.precosRevenda[grupoId] || 16;
+            console.log(`💰 DEBUG: Preço de revenda para grupo ${grupoId}: ${precoRevenda} MT/GB`);
 
             // Buscar dados das duas planilhas
             const [resultadoPedidos, resultadoPagamentos] = await Promise.all([

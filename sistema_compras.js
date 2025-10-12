@@ -91,8 +91,11 @@ class SistemaCompras {
                     console.log('✅ Histórico restaurado do backup!');
                 } else {
                     console.log('🛒 Criando novo arquivo de histórico de compradores...');
-                    this.historicoCompradores = {};
-                    await this.salvarDados(); // Salvar arquivo vazio inicial
+                    // IMPORTANTE: Não resetar se já houver dados na memória
+                    if (Object.keys(this.historicoCompradores).length === 0) {
+                        this.historicoCompradores = {};
+                        await this.salvarDados(); // Salvar arquivo vazio inicial
+                    }
                 }
             }
 
@@ -151,19 +154,40 @@ class SistemaCompras {
 
         } catch (error) {
             console.error('❌ COMPRAS: Erro crítico ao carregar dados:', error);
-            // Em caso de erro crítico, inicializar com dados vazios mas funcionais
-            this.historicoCompradores = {};
-            this.comprasPendentes = {};
-            await this.salvarDados();
+            // Em caso de erro crítico, NÃO resetar dados que já existem na memória
+            // Apenas garantir que os objetos estão definidos
+            if (!this.historicoCompradores) {
+                this.historicoCompradores = {};
+            }
+            if (!this.comprasPendentes) {
+                this.comprasPendentes = {};
+            }
+            console.log(`⚠️ Mantendo dados em memória: ${Object.keys(this.historicoCompradores).length} compradores`);
+
+            // Só salvar se realmente não houver dados
+            if (Object.keys(this.historicoCompradores).length === 0 && Object.keys(this.comprasPendentes).length === 0) {
+                await this.salvarDados();
+            }
         }
     }
 
     // === SALVAR DADOS COM BACKUP AUTOMÁTICO ===
     async salvarDados() {
         try {
-            console.log('💾 Salvando dados...');
+            // VALIDAÇÃO CRÍTICA: Verificar se dados estão íntegros antes de salvar
+            const qtdCompradores = Object.keys(this.historicoCompradores).length;
+            console.log(`💾 Salvando dados (${qtdCompradores} compradores)...`);
 
-            // Criar backup antes de salvar (apenas para histórico principal)
+            // Se histórico está vazio mas deveria ter dados, tentar recuperar do backup
+            if (qtdCompradores === 0) {
+                console.log('⚠️ ALERTA CRÍTICO: Histórico vazio detectado antes de salvar!');
+                const backupRestaurado = await this.restaurarBackupHistorico();
+                if (backupRestaurado) {
+                    console.log('✅ Backup restaurado automaticamente!');
+                }
+            }
+
+            // Criar backup antes de salvar (apenas para histórico principal com dados)
             if (Object.keys(this.historicoCompradores).length > 0) {
                 await this.criarBackupHistorico();
             }
@@ -191,12 +215,29 @@ class SistemaCompras {
     // === SALVAR ARQUIVO COM VERIFICAÇÃO ===
     async salvarArquivoSeguro(caminho, dados) {
         try {
+            // PROTEÇÃO CRÍTICA: Nunca salvar dados vazios se for o arquivo principal de compradores
+            if (caminho === this.ARQUIVO_COMPRADORES) {
+                const qtdCompradores = Object.keys(dados).length;
+
+                // Se estamos tentando salvar vazio, verificar se há backup
+                if (qtdCompradores === 0) {
+                    console.log(`⚠️ ALERTA: Tentativa de salvar histórico vazio! Verificando backup...`);
+
+                    // Tentar restaurar do backup antes de salvar vazio
+                    const backupRestaurado = await this.restaurarBackupHistorico();
+                    if (backupRestaurado) {
+                        console.log(`✅ Backup restaurado, cancelando salvamento vazio!`);
+                        return; // NÃO salvar vazio
+                    }
+                }
+            }
+
             const dadosJSON = JSON.stringify(dados, null, 2);
 
             // Verificar se os dados são válidos antes de salvar
             if (dadosJSON && dadosJSON !== 'null' && dadosJSON !== 'undefined') {
                 await fs.writeFile(caminho, dadosJSON);
-                console.log(`✅ Arquivo salvo: ${path.basename(caminho)}`);
+                console.log(`✅ Arquivo salvo: ${path.basename(caminho)} (${Object.keys(dados).length} registros)`);
             } else {
                 console.log(`⚠️ Dados inválidos não salvos: ${path.basename(caminho)}`);
             }
