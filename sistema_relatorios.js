@@ -347,9 +347,10 @@ class SistemaRelatorios {
             }
         });
 
-        // Calcular custos e lucros
+        // Calcular custos e lucros baseado apenas nos megas vendidos
         resultado.custoTotal = Math.round(resultado.totalGigas * this.PRECO_COMPRA);
-        resultado.lucroTotal = resultado.totalArrecadado - resultado.custoTotal;
+        const receitaTotalVendas = Math.round(resultado.totalGigas * precoRevenda);
+        resultado.lucroTotal = receitaTotalVendas - resultado.custoTotal;
 
         // Arredondar valores
         resultado.totalGigas = parseFloat(resultado.totalGigas.toFixed(2));
@@ -406,13 +407,14 @@ class SistemaRelatorios {
         }
         texto += `\n`;
 
-        // Seção Lucro (só se houver pagamentos confirmados)
-        if (dados.pagamentosConfirmados > 0) {
+        // Seção Lucro (só se houver vendas)
+        if (dados.totalGigas > 0) {
             const lucroPorGiga = precoRevenda - this.PRECO_COMPRA;
+            const receitaTotalVendas = Math.round(dados.totalGigas * precoRevenda);
 
             texto += `💰 *LUCRO (Últimas 24h):*\n`;
             texto += `📥 Custo total: ${dados.custoTotal.toLocaleString('pt-BR')} MT (${this.PRECO_COMPRA} MT/GB)\n`;
-            texto += `📤 Receita total: ${dados.totalArrecadado.toLocaleString('pt-BR')} MT (${precoRevenda} MT/GB)\n`;
+            texto += `📤 Receita total: ${receitaTotalVendas.toLocaleString('pt-BR')} MT (${precoRevenda} MT/GB)\n`;
             texto += `💚 Lucro líquido: ${dados.lucroTotal.toLocaleString('pt-BR')} MT (${lucroPorGiga} MT/GB)\n\n`;
         }
 

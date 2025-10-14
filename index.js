@@ -94,7 +94,7 @@ setInterval(verificarSinalRestart, 10000);
 
 // === AXIOS SIMPLIFICADO (SEGUINDO PADRÃO BOT1) ===
 const axiosInstance = axios.create({
-    timeout: 60000, // 60 segundos (aumentado de 30s para evitar timeout em planilhas grandes)
+    timeout: 60000, // 60 segundos - tolerância a conexões lentas
     maxRedirects: 3,
     headers: {
         'User-Agent': 'WhatsApp-Bot/1.0'
@@ -171,6 +171,9 @@ const SistemaCompras = require('./sistema_compras');
 // === IMPORTAR SISTEMA DE RELATÓRIOS ===
 const SistemaRelatorios = require('./sistema_relatorios');
 
+// === IMPORTAR SISTEMA DE BÔNUS ===
+const SistemaBonus = require('./sistema_bonus');
+
 // === CONFIGURAÇÃO GOOGLE SHEETS - BOT RETALHO (SCRIPT PRÓPRIO) ===
 const GOOGLE_SHEETS_CONFIG = {
     scriptUrl: process.env.GOOGLE_SHEETS_SCRIPT_URL_RETALHO || 'https://script.google.com/macros/s/AKfycbyMilUC5bYKGXV95LR4MmyaRHzMf6WCmXeuztpN0tDpQ9_2qkgCxMipSVqYK_Q6twZG/exec',
@@ -232,9 +235,10 @@ const client = new Client({
 require('dotenv').config();
 const ia = new WhatsAppAI(process.env.OPENAI_API_KEY);
 
-// === SISTEMA DE PACOTES (será inicializado após WhatsApp conectar) ===
+// === SISTEMA DE PACOTES E BÔNUS (serão inicializados após WhatsApp conectar) ===
 let sistemaPacotes = null;
 let sistemaCompras = null;
+let sistemaBonus = null;
 
 // REMOVIDO: Sistema de encaminhamento de mensagens
 // (Movido para outro bot)
@@ -1151,6 +1155,12 @@ function agendarSalvamento() {
 
 // Função para buscar saldo de bônus em todos os formatos possíveis
 async function buscarSaldoBonus(userId) {
+    // Usar sistemaBonus se disponível
+    if (sistemaBonus) {
+        return sistemaBonus.buscarSaldo(userId);
+    }
+
+    // Fallback para método antigo (caso sistemaBonus não esteja inicializado)
     console.log(`\n🔍 === BUSCA DE SALDO DETALHADA ===`);
     console.log(`📱 Buscando saldo para userId: "${userId}"`);
 
@@ -1221,6 +1231,13 @@ async function buscarSaldoBonus(userId) {
 
 // Função para atualizar saldo em todos os formatos existentes
 async function atualizarSaldoBonus(userId, operacao) {
+    // Usar sistemaBonus se disponível
+    if (sistemaBonus) {
+        await sistemaBonus.atualizarSaldo(userId, operacao);
+        return;
+    }
+
+    // Fallback para método antigo
     const numeroBase = userId.replace('@c.us', '').replace('@lid', '');
     const formatosPossiveis = [
         numeroBase,
@@ -1546,7 +1563,7 @@ function calcularValorPedido(megas, precosGrupo) {
     return Math.round(megasNum * valorPorMB);
 }
 
-// === FUNÇÃO PARA VERIFICAR PAGAMENTO ===
+// === FUNÇÃO PARA VERIFICAR PAGAMENTO (SÓ BUSCA, NÃO MARCA) ===
 async function verificarPagamentoIndividual(referencia, valorEsperado) {
     try {
         const valorNormalizado = normalizarValor(valorEsperado);
@@ -1565,42 +1582,19 @@ async function verificarPagamentoIndividual(referencia, valorEsperado) {
             headers: {
                 'Content-Type': 'application/json',
                 'Cache-Control': 'no-cache'
-            }
-        }, 3); // 3 tentativas
-
-        if (response.data && response.data.encontrado) {
-            console.log(`✅ REVENDEDORES: Pagamento encontrado (valor exato)!`);
-            return true;
-        }
-
-        // Segunda tentativa: busca apenas por referência (COM RETRY AUTOMÁTICO)
-        console.log(`🔍 REVENDEDORES: Tentando busca apenas por referência...`);
-        response = await axiosComRetry({
-            method: 'post',
-            url: PAGAMENTOS_CONFIG.scriptUrl,
-            data: {
-                action: "buscar_por_referencia_only",
-                referencia: referencia
             },
-            headers: {
-                'Content-Type': 'application/json',
-                'Cache-Control': 'no-cache'
-            }
+            timeout: 60000 // 60 segundos
         }, 3); // 3 tentativas
 
         if (response.data && response.data.encontrado) {
-            const valorEncontrado = parseFloat(response.data.valor || 0);
-            const diferenca = Math.abs(valorEncontrado - valorNormalizado);
-            const tolerancia = Math.max(1, valorNormalizado * 0.05); // 5% ou mín 1MT
-
-            console.log(`🔍 REVENDEDORES: Valor encontrado: ${valorEncontrado}MT vs esperado: ${valorNormalizado}MT (diff: ${diferenca.toFixed(2)}MT, tolerância: ${tolerancia.toFixed(2)}MT)`);
-
-            if (diferenca <= tolerancia) {
-                console.log(`✅ REVENDEDORES: Pagamento aceito com tolerância!`);
-                return true;
-            } else {
-                console.log(`❌ REVENDEDORES: Diferença muito grande entre valores`);
+            // Verificar se já foi processado
+            if (response.data.ja_processado) {
+                console.log(`⚠️ REVENDEDORES: Pagamento ${referencia} já foi processado anteriormente!`);
+                return 'JA_PROCESSADO'; // Retornar status especial
             }
+
+            console.log(`✅ REVENDEDORES: Pagamento encontrado e PENDENTE (valor exato)!`);
+            return true;
         }
 
         console.log(`❌ REVENDEDORES: Pagamento não encontrado`);
@@ -1614,6 +1608,42 @@ async function verificarPagamentoIndividual(referencia, valorEsperado) {
         } else {
             console.error(`❌ REVENDEDORES: Erro ao verificar pagamento:`, error.message);
         }
+        return false;
+    }
+}
+
+// === FUNÇÃO PARA MARCAR PAGAMENTO COMO PROCESSADO ===
+async function marcarPagamentoComoProcessado(referencia, valor) {
+    try {
+        const valorNormalizado = normalizarValor(valor);
+
+        console.log(`✅ REVENDEDORES: Marcando pagamento ${referencia} como PROCESSADO`);
+
+        const response = await axiosComRetry({
+            method: 'post',
+            url: PAGAMENTOS_CONFIG.scriptUrl,
+            data: {
+                action: "marcar_processado",
+                referencia: referencia,
+                valor: valorNormalizado
+            },
+            headers: {
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-cache'
+            },
+            timeout: 60000 // 60 segundos
+        }, 3); // 3 tentativas
+
+        if (response.data && response.data.success) {
+            console.log(`✅ REVENDEDORES: Pagamento ${referencia} marcado como PROCESSADO com sucesso!`);
+            return true;
+        } else {
+            console.log(`⚠️ REVENDEDORES: Não foi possível marcar pagamento como processado: ${response.data?.message || 'Erro desconhecido'}`);
+            return false;
+        }
+
+    } catch (error) {
+        console.error(`❌ REVENDEDORES: Erro ao marcar pagamento como processado:`, error.message);
         return false;
     }
 }
@@ -1810,6 +1840,11 @@ async function processarPagamentoConfirmado(pendencia) {
             return;
         }
 
+        // === MARCAR PAGAMENTO COMO PROCESSADO APÓS ENVIO BEM-SUCEDIDO ===
+        if (resultadoEnvio && resultadoEnvio.sucesso) {
+            await marcarPagamentoComoProcessado(referencia, pendencia.valorComprovante);
+        }
+
         // Registrar comprador
         await registrarComprador(chatId, numero, messageData.notifyName, megas);
 
@@ -1840,7 +1875,7 @@ const ADMINISTRADORES_GLOBAIS = [
     '258845356399@c.us',
     '258840326152@c.us',
     '258852118624@c.us',
-    '251032533737504@c.us',
+    '251032533737504@lid', // @lid do Mr Durst
     '251032533737504@lid',
     '203109674577958@c.us',
     '203109674577958@lid',
@@ -2083,7 +2118,6 @@ Importante 🚨: Envie o valor que consta na tabela!
     }
     
 };
-
 
 
 // === FUNÇÃO GOOGLE SHEETS ===
@@ -2850,8 +2884,13 @@ client.on('ready', async () => {
     // === INICIALIZAR SISTEMA DE COMPRAS ===
     sistemaCompras = new SistemaCompras();
     console.log('🛒 Sistema de Registro de Compras ATIVADO');
-    
-    // Carregar dados de referência
+
+    // === INICIALIZAR SISTEMA DE BÔNUS ===
+    sistemaBonus = new SistemaBonus();
+    await sistemaBonus.carregarDados();
+    console.log('💰 Sistema de Bônus ATIVADO');
+
+    // Carregar dados de referência (legado - será migrado)
     await carregarDadosReferencia();
     
     await carregarHistorico();
@@ -5486,6 +5525,21 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                 const valorComprovante = resultadoIA.valorComprovante || megas;
                 const pagamentoConfirmado = await verificarPagamentoIndividual(referencia, valorComprovante);
 
+                // Verificar se pagamento já foi processado
+                if (pagamentoConfirmado === 'JA_PROCESSADO') {
+                    console.log(`⚠️ REVENDEDORES: Pagamento ${referencia} já foi processado anteriormente!`);
+                    await message.reply(
+                        `⚠️ *PAGAMENTO JÁ PROCESSADO*\n\n` +
+                        `💰 Referência: ${referencia}\n` +
+                        `📊 Megas: ${megas} MB\n` +
+                        `📱 Número: ${numero}\n\n` +
+                        `❌ Este pagamento já foi processado anteriormente.\n` +
+                        `📝 Evite enviar o mesmo comprovante múltiplas vezes.\n\n` +
+                        `⏰ ${new Date().toLocaleString('pt-BR')}`
+                    );
+                    return;
+                }
+
                 if (!pagamentoConfirmado) {
                     console.log(`❌ REVENDEDORES: Pagamento não confirmado para texto - ${referencia} (${valorComprovante}MT)`);
 
@@ -5522,6 +5576,11 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                         `⏰ ${new Date().toLocaleString('pt-BR')}`
                     );
                     return;
+                }
+
+                // === MARCAR PAGAMENTO COMO PROCESSADO APÓS ENVIO BEM-SUCEDIDO ===
+                if (resultadoEnvio && resultadoEnvio.sucesso) {
+                    await marcarPagamentoComoProcessado(referencia, valorComprovante);
                 }
 
                 await registrarComprador(message.from, numero, nomeContato, megas);
@@ -5569,6 +5628,21 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                 const valorComprovante = resultadoIA.valorComprovante || megas;
                 const pagamentoConfirmado = await verificarPagamentoIndividual(referencia, valorComprovante);
 
+                // Verificar se pagamento já foi processado
+                if (pagamentoConfirmado === 'JA_PROCESSADO') {
+                    console.log(`⚠️ REVENDEDORES: Pagamento ${referencia} já foi processado anteriormente!`);
+                    await message.reply(
+                        `⚠️ *PAGAMENTO JÁ PROCESSADO*\n\n` +
+                        `💰 Referência: ${referencia}\n` +
+                        `📊 Megas: ${megas} MB\n` +
+                        `📱 Número: ${numero}\n\n` +
+                        `❌ Este pagamento já foi processado anteriormente.\n` +
+                        `📝 Evite enviar o mesmo comprovante múltiplas vezes.\n\n` +
+                        `⏰ ${new Date().toLocaleString('pt-BR')}`
+                    );
+                    return;
+                }
+
                 if (!pagamentoConfirmado) {
                     console.log(`❌ REVENDEDORES: Pagamento não confirmado para texto - ${referencia} (${valorComprovante}MT)`);
 
@@ -5605,6 +5679,11 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                         `⏰ ${new Date().toLocaleString('pt-BR')}`
                     );
                     return;
+                }
+
+                // === MARCAR PAGAMENTO COMO PROCESSADO APÓS ENVIO BEM-SUCEDIDO ===
+                if (resultadoEnvio && resultadoEnvio.sucesso) {
+                    await marcarPagamentoComoProcessado(referencia, valorComprovante);
                 }
 
                 await registrarComprador(message.from, numero, nomeContato, megas);
