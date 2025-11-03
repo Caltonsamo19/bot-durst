@@ -48,6 +48,126 @@ class WhatsAppAI {
     this.rateLimiter.requests.push(now);
   }
 
+  // === CALCULAR VALOR DE 10GB BASEADO NA TABELA DO GRUPO ===
+  calcularValor10GB(tabelaPrecos) {
+    try {
+      if (!tabelaPrecos) {
+        console.log(`⚠️ Tabela de preços não fornecida, usando valor padrão`);
+        return 170; // Valor padrão: 10GB = 170MT
+      }
+
+      // Buscar padrões de 10GB ou 10240MB na tabela
+      const patterns = [
+        /10240\s*MB.*?(\d+)\s*MT/i,
+        /10GB.*?(\d+)\s*MT/i,
+        /10000\s*MB.*?(\d+)\s*MT/i,
+        /(\d+)\s*MT.*?10240\s*MB/i,
+        /(\d+)\s*MT.*?10GB/i
+      ];
+
+      for (const pattern of patterns) {
+        const match = tabelaPrecos.match(pattern);
+        if (match && match[1]) {
+          const valor = parseFloat(match[1]);
+          console.log(`✅ Valor de 10GB encontrado na tabela: ${valor}MT`);
+          return valor;
+        }
+      }
+
+      // Se não encontrar 10GB, calcular proporcionalmente baseado em 1GB
+      const pattern1GB = /1024\s*MB.*?(\d+)\s*MT/i;
+      const match1GB = tabelaPrecos.match(pattern1GB);
+
+      if (match1GB && match1GB[1]) {
+        const valor1GB = parseFloat(match1GB[1]);
+        const valor10GB = valor1GB * 10;
+        console.log(`💡 Valor de 10GB calculado proporcionalmente: ${valor10GB}MT (1GB=${valor1GB}MT × 10)`);
+        return valor10GB;
+      }
+
+      console.log(`⚠️ Não foi possível encontrar valor de 10GB na tabela, usando padrão`);
+      return 170; // Valor padrão
+
+    } catch (error) {
+      console.error(`❌ Erro ao calcular valor de 10GB:`, error.message);
+      return 170; // Valor padrão em caso de erro
+    }
+  }
+
+  // === DIVIDIR TRANSFERÊNCIA EM BLOCOS DE 10GB (VENDAS AVULSAS) ===
+  dividirEmBlocos(referenciaOriginal, megasTotais, numeros, tabelaPrecos = null) {
+    try {
+      console.log(`🔧 DIVISÃO: Iniciando divisão de ${megasTotais}MB para ${numeros.length} número(s)`);
+
+      const BLOCO_MAX = 10240; // 10GB em MB
+      const megasPorNumero = Math.floor(megasTotais / numeros.length);
+
+      console.log(`📊 Cada número receberá: ${megasPorNumero}MB`);
+
+      // Calcular valor de 10GB baseado na tabela
+      const valor10GB = this.calcularValor10GB(tabelaPrecos);
+
+      const todosPedidos = [];
+      let contadorSufixoGlobal = 0;
+
+      // Para cada número, dividir seus megas em blocos
+      for (let numIndex = 0; numIndex < numeros.length; numIndex++) {
+        const numero = numeros[numIndex];
+        const megasNumero = megasPorNumero;
+        const numBlocos = Math.ceil(megasNumero / BLOCO_MAX);
+
+        console.log(`📱 Número ${numIndex + 1}/${numeros.length} (${numero}): ${megasNumero}MB → ${numBlocos} blocos`);
+
+        let megasRestantes = megasNumero;
+
+        for (let i = 0; i < numBlocos; i++) {
+          const megasBloco = Math.min(BLOCO_MAX, megasRestantes);
+
+          // PRIMEIRA transação usa referência ORIGINAL (sem sufixo)
+          // Demais usam sufixo 01, 02, 03...
+          let referenciaBloco;
+          if (contadorSufixoGlobal === 0) {
+            referenciaBloco = referenciaOriginal;
+          } else {
+            const sufixo = String(contadorSufixoGlobal).padStart(2, '0');
+            referenciaBloco = `${referenciaOriginal}${sufixo}`;
+          }
+
+          // Calcular valor proporcional
+          const valorBloco = megasBloco === BLOCO_MAX
+            ? valor10GB
+            : (valor10GB * megasBloco / BLOCO_MAX).toFixed(2);
+
+          todosPedidos.push({
+            referencia: referenciaBloco,
+            megas: megasBloco,
+            numero: numero,
+            valor: parseFloat(valorBloco)
+          });
+
+          megasRestantes -= megasBloco;
+          contadorSufixoGlobal++;
+
+          console.log(`   📦 Bloco ${contadorSufixoGlobal}: ${referenciaBloco} → ${megasBloco}MB → ${numero} (${valorBloco}MT)`);
+        }
+      }
+
+      console.log(`✅ DIVISÃO CONCLUÍDA: ${todosPedidos.length} blocos no total`);
+
+      return {
+        sucesso: true,
+        pedidos: todosPedidos,
+        totalBlocos: todosPedidos.length,
+        megasPorNumero: megasPorNumero,
+        valorTotal: todosPedidos.reduce((sum, p) => sum + p.valor, 0)
+      };
+
+    } catch (error) {
+      console.error(`❌ DIVISÃO: Erro ao dividir em blocos:`, error);
+      return { sucesso: false, erro: error.message };
+    }
+  }
+
   // === RECONSTRUIR REFERÊNCIAS QUEBRADAS ===
   reconstruirReferenciasQuebradas(texto) {
     console.log('🔧 Reconstruindo referências quebradas...');
@@ -1317,33 +1437,74 @@ Se não conseguires extrair os dados:
       }
       
       // Processamento normal (sem divisão automática)
+      // Calcular megas totais baseado no valor e tabela do grupo
+      const megasTotais = configGrupo ? this.calcularMegasPorValor(comprovante.valor, configGrupo.tabela) : comprovante.valor;
+      const LIMITE_BLOCO = 10240; // 10GB
+
+      console.log(`   📊 Megas totais (imediato): ${megasTotais}MB para ${numeros.length} número(s)`);
+
+      // === VERIFICAR SE PRECISA DIVIDIR EM BLOCOS DE 10GB ===
+      if (megasTotais > LIMITE_BLOCO || (numeros.length > 1 && (megasTotais / numeros.length) > LIMITE_BLOCO)) {
+        console.log(`   🔧 Transferência > 10GB - DIVIDINDO EM BLOCOS (fluxo imediato)`);
+
+        const tabelaPrecos = configGrupo ? configGrupo.tabela : null;
+        const divisao = this.dividirEmBlocos(comprovante.referencia, megasTotais, numeros, tabelaPrecos);
+
+        if (!divisao.sucesso) {
+          console.error(`   ❌ Erro na divisão em blocos:`, divisao.erro);
+          return {
+            sucesso: false,
+            tipo: 'erro_divisao',
+            erro: divisao.erro
+          };
+        }
+
+        // Criar dadosCompletos a partir dos blocos
+        const dadosCompletos = divisao.pedidos.map(p =>
+          `${p.referencia}|${p.megas}|${p.numero}`
+        ).join('\n');
+
+        console.log(`   ✅ DIVISÃO CONCLUÍDA (imediato): ${divisao.totalBlocos} blocos criados`);
+
+        return {
+          sucesso: true,
+          dadosCompletos: dadosCompletos,
+          tipo: 'divisao_blocos',
+          numeros: numeros,
+          totalBlocos: divisao.totalBlocos,
+          megasPorNumero: divisao.megasPorNumero,
+          valorTotal: divisao.valorTotal,
+          divisao: divisao,
+          valorComprovante: comprovante.valor,
+          origem: 'comprovante_numero_imediato_com_divisao'
+        };
+      }
+
+      // === PROCESSAMENTO NORMAL (SEM DIVISÃO) ===
       if (numeros.length === 1) {
-        // Calcular megas baseado no valor e tabela do grupo
-        const megas = configGrupo ? this.calcularMegasPorValor(comprovante.valor, configGrupo.tabela) : comprovante.valor;
-        // DEBUG removido para performance
-        const resultado = `${comprovante.referencia}|${megas}|${numeros[0]}`;
-        console.log(`   ✅ PEDIDO COMPLETO IMEDIATO: ${resultado} (${comprovante.valor}MT → ${megas}MB)`);
-        return { 
-          sucesso: true, 
+        const resultado = `${comprovante.referencia}|${megasTotais}|${numeros[0]}`;
+        console.log(`   ✅ PEDIDO COMPLETO IMEDIATO: ${resultado} (${comprovante.valor}MT → ${megasTotais}MB)`);
+        return {
+          sucesso: true,
           dadosCompletos: resultado,
           tipo: 'numero_processado',
           numero: numeros[0],
           valorComprovante: comprovante.valor,
           valorPago: comprovante.valor,
-          megas: megas
+          megas: megasTotais
         };
       } else {
         // Múltiplos números - dividir valor igualmente
         const valorTotal = parseFloat(comprovante.valor);
         const valorPorNumero = (valorTotal / numeros.length).toFixed(2);
-        
-        const resultados = numeros.map(numero => 
+
+        const resultados = numeros.map(numero =>
           `${comprovante.referencia}|${valorPorNumero}|${numero}`
         );
-        
+
         console.log(`   ✅ PEDIDOS MÚLTIPLOS IMEDIATOS: ${resultados.join(' + ')}`);
-        return { 
-          sucesso: true, 
+        return {
+          sucesso: true,
           dadosCompletos: resultados.join('\n'),
           tipo: 'numeros_multiplos_processados',
           numeros: numeros,
@@ -1555,39 +1716,82 @@ Se não conseguires ler a imagem ou extrair os dados:
         return await this.processarNumerosComDivisaoAutomatica(numeros, remetente, comprovante);
       }
       
-      if (numeros.length === 1) {
-        // Calcular megas baseado no valor e tabela do grupo
-        const megas = configGrupo ? this.calcularMegasPorValor(comprovante.valor, configGrupo.tabela) : comprovante.valor;
-        const resultado = `${comprovante.referencia}|${megas}|${numeros[0]}`;
+      // Calcular megas totais baseado no valor e tabela do grupo
+      const megasTotais = configGrupo ? this.calcularMegasPorValor(comprovante.valor, configGrupo.tabela) : comprovante.valor;
+      const LIMITE_BLOCO = 10240; // 10GB
+
+      console.log(`   📊 Megas totais: ${megasTotais}MB para ${numeros.length} número(s)`);
+
+      // === VERIFICAR SE PRECISA DIVIDIR EM BLOCOS DE 10GB ===
+      if (megasTotais > LIMITE_BLOCO || (numeros.length > 1 && (megasTotais / numeros.length) > LIMITE_BLOCO)) {
+        console.log(`   🔧 Transferência > 10GB - DIVIDINDO EM BLOCOS`);
+
+        const tabelaPrecos = configGrupo ? configGrupo.tabela : null;
+        const divisao = this.dividirEmBlocos(comprovante.referencia, megasTotais, numeros, tabelaPrecos);
+
+        if (!divisao.sucesso) {
+          console.error(`   ❌ Erro na divisão em blocos:`, divisao.erro);
+          return {
+            sucesso: false,
+            tipo: 'erro_divisao',
+            erro: divisao.erro
+          };
+        }
+
+        // Criar dadosCompletos a partir dos blocos
+        const dadosCompletos = divisao.pedidos.map(p =>
+          `${p.referencia}|${p.megas}|${p.numero}`
+        ).join('\n');
+
         delete this.comprovantesEmAberto[remetente];
-        
-        console.log(`   ✅ PEDIDO COMPLETO: ${resultado} (${comprovante.valor}MT → ${megas}MB)`);
-        return { 
-          sucesso: true, 
+
+        console.log(`   ✅ DIVISÃO CONCLUÍDA: ${divisao.totalBlocos} blocos criados`);
+
+        return {
+          sucesso: true,
+          dadosCompletos: dadosCompletos,
+          tipo: 'divisao_blocos',
+          numeros: numeros,
+          totalBlocos: divisao.totalBlocos,
+          megasPorNumero: divisao.megasPorNumero,
+          valorTotal: divisao.valorTotal,
+          divisao: divisao,
+          origem: 'comprovante_em_aberto_com_divisao'
+        };
+      }
+
+      // === PROCESSAMENTO NORMAL (SEM DIVISÃO) ===
+      if (numeros.length === 1) {
+        const resultado = `${comprovante.referencia}|${megasTotais}|${numeros[0]}`;
+        delete this.comprovantesEmAberto[remetente];
+
+        console.log(`   ✅ PEDIDO COMPLETO: ${resultado} (${comprovante.valor}MT → ${megasTotais}MB)`);
+        return {
+          sucesso: true,
           dadosCompletos: resultado,
           tipo: 'numero_processado',
           numero: numeros[0],
           valorComprovante: comprovante.valor,
           origem: 'comprovante_em_aberto',
           valorPago: comprovante.valor,
-          megas: megas
+          megas: megasTotais
         };
-        
+
       } else {
         const valorTotal = parseFloat(comprovante.valor);
         const valorPorNumero = (valorTotal / numeros.length).toFixed(2);
-        
+
         console.log(`   🔄 Dividindo ${valorTotal}MT por ${numeros.length} números = ${valorPorNumero}MT cada`);
-        
-        const resultados = numeros.map(numero => 
+
+        const resultados = numeros.map(numero =>
           `${comprovante.referencia}|${valorPorNumero}|${numero}`
         );
-        
+
         delete this.comprovantesEmAberto[remetente];
-        
+
         console.log(`   ✅ PEDIDOS MÚLTIPLOS: ${resultados.join(' + ')}`);
-        return { 
-          sucesso: true, 
+        return {
+          sucesso: true,
           dadosCompletos: resultados.join('\n'),
           tipo: 'numeros_multiplos_processados',
           numeros: numeros,

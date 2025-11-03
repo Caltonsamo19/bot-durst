@@ -39,6 +39,7 @@ class SistemaCompras {
         this.ARQUIVO_RANKING_SEMANAL = path.join(__dirname, 'ranking_semanal.json');
         this.ARQUIVO_RANKING_DIARIO_MEGAS = path.join(__dirname, 'ranking_diario_megas.json');
         this.ARQUIVO_MENSAGENS_RANKING = path.join(__dirname, 'mensagens_ranking.json');
+        this.ARQUIVO_BLOCOS_DIVIDIDOS = path.join(__dirname, 'blocos_divididos.json');
 
         // Arquivos de backup
         this.PASTA_BACKUP = path.join(__dirname, 'backup_historico');
@@ -47,10 +48,11 @@ class SistemaCompras {
 
         // Garantir que a pasta de backup existe
         this.garantirPastaBackup();
-        
+
         // Dados em memória
         this.historicoCompradores = {}; // {numero: {comprasTotal: 0, ultimaCompra: date, megasTotal: 0, grupos: {grupoId: {compras: 0, megas: 0, comprasDia: 0, megasDia: 0, ultimaCompraDia: date, comprasSemana: 0, megasSemana: 0, ultimaCompraSemana: date}}}}
         this.comprasPendentes = {}; // {referencia: {numero, megas, timestamp, tentativas, grupoId}}
+        this.blocosDivididos = {}; // {referenciaOriginal: {blocos: [refs], megasAcumulados: 0, numero: X, grupoId: Y, totalEsperado: 8}}
         this.rankingPorGrupo = {}; // {grupoId: [{numero, megas, compras, posicao}]}
         this.rankingSemanalPorGrupo = {}; // {grupoId: [{numero, megasSemana, comprasSemana, posicao}]}
         this.rankingDiarioPorGrupo = {}; // {grupoId: [{numero, megasDia, comprasDia, posicao}]}
@@ -315,64 +317,178 @@ class SistemaCompras {
     }
 
     // === PROCESSAR CONFIRMAÇÃO DO BOT SECUNDÁRIO ===
+    // === DETECTAR SE REFERÊNCIA É BLOCO DIVIDIDO ===
+    detectarBlocoDividido(referencia) {
+        // Padrão: ABC123 (original) ou ABC12301, ABC12302... (blocos)
+        const match = referencia.match(/^([A-Za-z0-9._-]+?)(\d{2})$/);
+
+        if (match) {
+            // É um bloco dividido (com sufixo numérico)
+            return {
+                ehBloco: true,
+                referenciaOriginal: match[1],
+                numeroBloco: parseInt(match[2]) + 1 // +1 porque bloco 00 seria o segundo (01 é segundo)
+            };
+        } else {
+            // É referência original (sem sufixo ou com sufixo diferente)
+            return {
+                ehBloco: false,
+                referenciaOriginal: referencia,
+                numeroBloco: 1 // Primeiro bloco
+            };
+        }
+    }
+
+    // === REGISTRAR BLOCO DIVIDIDO ===
+    async registrarBlocoDividido(referencia, numero, megas, grupoId, remetente) {
+        const deteccao = this.detectarBlocoDividido(referencia);
+        const refOriginal = deteccao.referenciaOriginal;
+
+        // Inicializar rastreamento se não existe
+        if (!this.blocosDivididos[refOriginal]) {
+            this.blocosDivididos[refOriginal] = {
+                blocos: [],
+                megasAcumulados: 0,
+                numero: numero,
+                grupoId: grupoId,
+                remetente: remetente,
+                referenciaOriginal: refOriginal
+            };
+        }
+
+        const rastreamento = this.blocosDivididos[refOriginal];
+
+        // Adicionar bloco
+        rastreamento.blocos.push({
+            referencia: referencia,
+            megas: megas,
+            numeroBloco: deteccao.numeroBloco,
+            timestamp: new Date().toISOString()
+        });
+
+        rastreamento.megasAcumulados += megas;
+
+        console.log(`📦 BLOCO REGISTRADO: ${referencia} → ${megas}MB (Total acumulado: ${rastreamento.megasAcumulados}MB, Blocos: ${rastreamento.blocos.length})`);
+
+        return rastreamento;
+    }
+
+    // === VERIFICAR SE É ÚLTIMO BLOCO ===
+    verificarUltimoBloco(referencia) {
+        const deteccao = this.detectarBlocoDividido(referencia);
+        const refOriginal = deteccao.referenciaOriginal;
+
+        // Se não tem rastreamento, não é divisão (ou é o primeiro bloco único)
+        if (!this.blocosDivididos[refOriginal]) {
+            return { ehUltimo: true, dadosDivisao: null };
+        }
+
+        const rastreamento = this.blocosDivididos[refOriginal];
+
+        // Verificar se ainda há blocos pendentes
+        // Lógica: Se temos N blocos registrados e ainda há pedidos pendentes com a mesma referência original, não é o último
+        const blocosPendentes = Object.keys(this.comprasPendentes).filter(ref => {
+            const det = this.detectarBlocoDividido(ref);
+            return det.referenciaOriginal === refOriginal;
+        });
+
+        const ehUltimo = blocosPendentes.length === 0;
+
+        console.log(`🔍 VERIFICAÇÃO ÚLTIMO BLOCO: ${referencia} | Blocos pendentes: ${blocosPendentes.length} | É último: ${ehUltimo}`);
+
+        return {
+            ehUltimo: ehUltimo,
+            dadosDivisao: rastreamento
+        };
+    }
+
     async processarConfirmacao(referencia, numeroConfirmado) {
         try {
             console.log(`🛒 COMPRAS: Processando confirmação - ${referencia}`);
             console.log(`📋 COMPRAS: Pendências atuais:`, Object.keys(this.comprasPendentes));
-            
+
             // Verificar se existe compra pendente
             if (!this.comprasPendentes[referencia]) {
                 console.log(`⚠️ COMPRAS: Confirmação ${referencia} não encontrada nas pendências`);
                 console.log(`📋 COMPRAS: Tentando busca case-insensitive...`);
-                
+
                 // Tentar busca case-insensitive
                 const referenciaEncontrada = Object.keys(this.comprasPendentes).find(
                     ref => ref.toUpperCase() === referencia.toUpperCase()
                 );
-                
+
                 if (!referenciaEncontrada) {
                     console.log(`❌ COMPRAS: Referência ${referencia} realmente não encontrada`);
                     return null;
                 }
-                
+
                 console.log(`✅ COMPRAS: Referência encontrada com diferença de case: ${referenciaEncontrada}`);
                 referencia = referenciaEncontrada; // Usar a referência correta
             }
-            
+
             const compraPendente = this.comprasPendentes[referencia];
             const numero = compraPendente.numero; // Número que recebe os megas
             const megas = compraPendente.megas;
             const remetente = compraPendente.remetente; // Quem fez a compra
-            
+
             // Verificar se o número confere (opcional, para segurança)
             if (numeroConfirmado && numeroConfirmado !== numero) {
                 console.log(`⚠️ COMPRAS: Número da confirmação (${numeroConfirmado}) não confere com pendência (${numero})`);
             }
-            
-            // Registrar compra confirmada para o REMETENTE (quem comprou)
-            const numeroComprador = remetente || numero; // Fallback para compatibilidade
-            console.log(`🔍 Processando parabenização`);
-            await this.registrarCompraConfirmada(numeroComprador, megas, referencia, compraPendente.grupoId);
-            
-            // Remover das pendentes
+
+            // === LÓGICA DE DIVISÃO EM BLOCOS ===
+            const deteccao = this.detectarBlocoDividido(referencia);
+            console.log(`🔧 DETECÇÃO: Referência ${referencia} | Original: ${deteccao.referenciaOriginal} | Bloco: ${deteccao.numeroBloco}`);
+
+            // Registrar bloco dividido
+            await this.registrarBlocoDividido(referencia, numero, megas, compraPendente.grupoId, remetente);
+
+            // Remover da lista de pendentes
             delete this.comprasPendentes[referencia];
+
+            // Verificar se é o último bloco
+            const verificacao = this.verificarUltimoBloco(referencia);
+
+            if (!verificacao.ehUltimo) {
+                console.log(`⏳ AGUARDANDO: Bloco ${referencia} confirmado, mas ainda há blocos pendentes. Aguardando último bloco...`);
+                await this.salvarDados();
+                return null; // NÃO parabenizar ainda
+            }
+
+            // === É O ÚLTIMO BLOCO - PARABENIZAR COM TOTAL ACUMULADO ===
+            console.log(`🎉 ÚLTIMO BLOCO CONFIRMADO: ${referencia}`);
+
+            const dadosDivisao = verificacao.dadosDivisao;
+            const megasTotais = dadosDivisao.megasAcumulados;
+            const numeroComprador = remetente || numero;
+
+            console.log(`📊 DIVISÃO COMPLETA: ${dadosDivisao.blocos.length} blocos | ${megasTotais}MB totais`);
+
+            // Registrar compra confirmada COM TOTAL ACUMULADO
+            await this.registrarCompraConfirmada(numeroComprador, megasTotais, deteccao.referenciaOriginal, compraPendente.grupoId);
+
+            // Limpar rastreamento de blocos
+            delete this.blocosDivididos[deteccao.referenciaOriginal];
+
             await this.salvarDados();
-            
-            // Gerar mensagem de parabenização para o REMETENTE (quem comprou)
-            const mensagemParabenizacao = await this.gerarMensagemParabenizacao(numeroComprador, megas, compraPendente.grupoId);
-            
-            console.log(`✅ COMPRAS: Confirmação processada para ${numero} - ${megas}MB`);
+
+            // Gerar mensagem de parabenização COM TOTAL ACUMULADO
+            const mensagemParabenizacao = await this.gerarMensagemParabenizacao(numeroComprador, megasTotais, compraPendente.grupoId);
+
+            console.log(`✅ COMPRAS: Divisão completa processada para ${numero} - ${megasTotais}MB (${dadosDivisao.blocos.length} blocos)`);
             console.log(`💬 COMPRAS: Mensagem de parabenização:`, mensagemParabenizacao ? 'GERADA' : 'NÃO GERADA');
-            
+
             return {
-                numero: numero, // Número que recebeu os megas  
-                numeroComprador: numeroComprador, // Número de quem fez a compra (para menção)
-                megas: megas,
-                referencia: referencia,
+                numero: numero,
+                numeroComprador: numeroComprador,
+                megas: megasTotais, // TOTAL ACUMULADO
+                referencia: deteccao.referenciaOriginal,
+                blocosTotal: dadosDivisao.blocos.length,
+                divisao: true,
                 mensagem: mensagemParabenizacao ? mensagemParabenizacao.mensagem : null,
                 contactId: mensagemParabenizacao ? mensagemParabenizacao.contactId : null
             };
-            
+
         } catch (error) {
             console.error('❌ COMPRAS: Erro ao processar confirmação:', error);
             return null;

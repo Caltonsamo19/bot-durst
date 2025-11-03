@@ -1988,136 +1988,232 @@ const MODERACAO_CONFIG = {
     },
     detectarLinks: true,
     apagarMensagem: true,
-    removerUsuario: true,
+    removerUsuario: true, // DESATIVADO: não remove mais usuários, apenas apaga a mensagem
     excecoes: [
         '258861645968@c.us',
-        '258871112049@c.us', 
+        '258871112049@c.us',
         '258852118624@c.us'
     ]
 };
 
 // Configuração para cada grupo
 const CONFIGURACAO_GRUPOS = {
-        '258840161370-1471468657@g.us': {
+    '258840161370-1471468657@g.us': {
         nome: 'Venda Automática 24/7',
-        tabela: `TABELA ATUALIZADA 
-Outubro 2025🥳🥳
-Pacotes exclusivos apenas para Vodacom🔴🔴
-Pacotes Diários, Semanais (Renováveis) e Mensal 
-___________________________
+        tabela: `📢🔥 TABELA ATUALIZADA – OUTUBRO 2025 🔥📢
+Internet e Chamadas Ilimitadas – Vodacom
+Pacotes Diários | Semanais | Mensais
 
- PACOTE DIÁRIO BÁSICO( 24H⏱) 
-1024MB    - 17,00 MT
-1200MB    - 20,00 MT
-2048MB   - 34,00 MT
-2200MB    - 40,00 MT
-3096MB    - 51,00 MT
-4096MB    - 68,00 MT
-5120MB     - 85,00 MT
-6144MB    - 102,00 MT
-7168MB    - 119,00 MT
-8192MB    - 136,00 MT
-9144MB    - 153,00 MT
-10240MB  - 170,00 MT
+OFERTA ESPECIAL – 24 HORAS ⏱
+600MB - 10MT
+800MB - 15MT
+1024MB - 17MT
+1200MB - 20MT
+2048MB - 34MT
 
- PACOTE DIÁRIO PREMIUM ( 3 DIAS 🗓) 
-Megabyte Renováveis! 
-2000MB  - 44,00 MT
-3000MB  - 66,00 MT
-4000MB  - 88,00 MT
-5000MB - 109,00 MT
-6000MB  - 133,00 MT
-7000MB  - 149,00 MT
-10000MB  - 219,00 MT
+PACOTES DIÁRIOS (24H ⏱)
+2400MB - 40MT
+3072MB - 51MT
+4096MB - 68MT
+5120MB - 85MT
+6144MB - 102MT
+7168MB - 119MT
+8192MB - 136MT
+9144MB - 153MT
+10240MB - 170MT
 
-PACOTE SEMANAL BÁSICO (5 Dias🗓)
-Megabyte Renováveis!
-1700MB - 45,00MT
-2900MB - 80,00MT
-3400MB - 110,00MT
-5500MB - 150,00MT
-7800MB - 200,00MT
-11400MB - 300,00MT 
+PACOTES PREMIUM (3 DIAS 🗓 – RENOVÁVEIS)
+2000MB - 44MT
+3000MB - 66MT
+4000MB - 88MT
+5000MB - 109MT
+6000MB - 133MT
+7000MB - 149MT
+10000MB - 219MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 3 dias
 
- PACOTE SEMANAL PREMIUM ( 15 DIAS 🗓 ) 
-Megabyte Renováveis!
-3000MB - 100,00 MT
-5000MB - 149,00 MT
-8000MB - 201,00 MT
-10000MB - 231,00 MT
-20000MB - 352,00 MT
+SEMANAIS BÁSICOS (5 DIAS 🗓 – RENOVÁVEIS)
+1700MB - 45MT
+2900MB - 80MT
+3400MB - 110MT
+5500MB - 150MT
+7800MB - 200MT
+11400MB - 300MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 5 dias
 
-PACOTE MENSAL EXCLUSIVO (30 dias🗓) 
-Não Renováveis 
-Não pode ter xtuna crédito
+SEMANAIS PREMIUM (15 DIAS 🗓 – RENOVÁVEIS)
+3000MB - 100MT
+5000MB - 149MT
+8000MB - 201MT
+10000MB - 231MT
+20000MB - 352MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 15 dias
 
+PACOTES MENSAIS EXCLUSIVOS (30 DIAS 📆 – NÃO RENOVÁVEIS)
+2.8GB - 100MT
+5.8GB - 175MT
+8.8GB - 200MT
+10.8GB - 249MT
+12.8GB - 300MT
+15.8GB - 349MT
+18.8GB - 400MT
+20.8GB - 449MT
+25.8GB - 549MT
+32.8GB - 649MT
+51.2GB - 1049MT
+60.2GB - 1249MT
+80.2GB - 1449MT
+100.2GB - 1700MT
+Observação: Pacotes mensais não compatíveis com Txuna
 
-2.8GB   - 100,00MT
-5.8GB   - 175,00MT
-8.8GB    - 200,00MT
-10.8GB  - 249,00MT
-12.8GB   - 300,00MT
-15.8GB    - 349,00MT
-18.8GB    - 400,00MT
-20.8GB    - 449,00MT
-25.8GB    - 549,00MT
-32.8GB   - 649,00MT
-51.2GB   - 1049,00MT
-60.2GB   - 124900MT
-80.2GB   - 1449,00MT
-100.2GB   - 1700,00MT
+CHAMADAS ILIMITADAS — VODACOM 📞 ♾
 
-🔴🔴 VODACOM
-➖Chamadas +SMS ILIMITADAS ➖p/todas as redes +GB➖
+11GB - 449MT - Ilimitadas ✨
+14.5GB - 500MT - Ilimitadas
+26.5GB - 700MT - Ilimitadas
+37.5GB - 1000MT - Ilimitadas
+53.5GB - 1500MT - Ilimitadas
+102.5GB - 2150MT - Ilimitadas
+Inclui chamadas e SMS ilimitadas para todas as redes
 
-➖ SEMANAL (7dias)➖
-280mt = Ilimitado+ 7.5GB
+CHAMADAS ILIMITADAS — MOVITEL 📞 ♾
 
-Mensal(30dias):
-450MT - Ilimitado + 11.5GB.
-500MT - Ilimitado + 14.5GB.
-700MT - Ilimitado + 26.5GB.
-1000MT - Ilimitado + 37.5GB.
-1500MT - Ilimitado + 53.5GB
-2150MT - Ilimitado + 102.5GB
+9GB - 469MT - Ilimitadas ✨
+23GB - 950MT - Ilimitadas
+38GB - 1450MT - Ilimitadas
+46GB - 1700MT - Ilimitadas
+53GB - 1900MT - Ilimitadas
+68GB - 2400MT - Ilimitadas
+Inclui chamadas e SMS ilimitadas para todas as redes
 
-PARA OS PACOTES MENSAIS, NÃO PODE TER TXUNA CRÉDITO.
-
-🟠🟠 MOVITEL
-➖Chamadas +SMS ILIMITADAS ➖p/todas as redes +GB➖
-
-➖ SEMANAL (7dias)➖
-280mt = Ilimitado+ 7.1GB
-
-➖ MENSAL (30dias)➖ p./tds redes
-450mt = Ilimitado+ 9GB
-950mt = Ilimitado+ 23GB
-1450mt = Ilimitado+ 38GB
-1700mt = Ilimitado+ 46GB
-1900mt = Ilimitado+ 53GB
-2400mt = ilimitado+ 68GB
-
-Importante 🚨: Envie o valor que consta na tabela!
+🔹 CONEXÃO SEM LIMITES 🔹
+Internet rápida, chamadas e SMS ilimitadas.
+Pacotes exclusivos Vodacom e Movitel.
+Sempre conectado, sempre no controle!
 `,
 
-        pagamento: `╭━━━┛ 💸  ＦＯＲＭＡＳ ＤＥ ＰＡＧＡＭＥＮＴＯ: 
-┃
-┃ 🪙 E-Mola: (Glória) 👩‍💻
-┃     860186270  
-┃
-┃ 🪙 M-Pesa:  (Leonor)👨‍💻
-┃     857451196  
-┃
-┃
-┃ ⚠ IMPORTANTE:  
-┃     ▪ Envie o comprovativo em forma de mensagem e o número para receber rápido!
-┃
-┃┃
-╰⚠ NB: Válido apenas para Vodacom━━━━━━  
-       🚀 O futuro é agora. Vamos?`
+        pagamento: `💸 FORMAS DE PAGAMENTO
+
+🟠 E-Mola – Glória | 📲 860186270  
+🔴 M-Pesa – Leonor | 📲 857451196  
+
+⚠ ATENÇÃO  
+▪ Após o pagamento, envie a confirmação ✉ ** e o seu número para receber o seu pacote 📲  
+▪ Envie ** o valor exato da tabela 💰  
+
+NB: Válido apenas para Vodacom  
+🚀 Garanta seus Megabytes agora!
+`
+    },
+'258876291014-1634575097@g.us': {
+        nome: '🪐V2 Megabytes NetConnect 🌍',
+        tabela: `📢🔥 TABELA ATUALIZADA – OUTUBRO 2025 🔥📢
+Internet e Chamadas Ilimitadas – Vodacom
+Pacotes Diários | Semanais | Mensais
+
+OFERTA ESPECIAL – 24 HORAS ⏱
+600MB - 10MT
+800MB - 15MT
+1024MB - 17MT
+1200MB - 20MT
+2048MB - 34MT
+
+PACOTES DIÁRIOS (24H ⏱)
+2400MB - 40MT
+3072MB - 51MT
+4096MB - 68MT
+5120MB - 85MT
+6144MB - 102MT
+7168MB - 119MT
+8192MB - 136MT
+9144MB - 153MT
+10240MB - 170MT
+
+PACOTES PREMIUM (3 DIAS 🗓 – RENOVÁVEIS)
+2000MB - 44MT
+3000MB - 66MT
+4000MB - 88MT
+5000MB - 109MT
+6000MB - 133MT
+7000MB - 149MT
+10000MB - 219MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 3 dias
+
+SEMANAIS BÁSICOS (5 DIAS 🗓 – RENOVÁVEIS)
+1700MB - 45MT
+2900MB - 80MT
+3400MB - 110MT
+5500MB - 150MT
+7800MB - 200MT
+11400MB - 300MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 5 dias
+
+SEMANAIS PREMIUM (15 DIAS 🗓 – RENOVÁVEIS)
+3000MB - 100MT
+5000MB - 149MT
+8000MB - 201MT
+10000MB - 231MT
+20000MB - 352MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 15 dias
+
+PACOTES MENSAIS EXCLUSIVOS (30 DIAS 📆 – NÃO RENOVÁVEIS)
+2.8GB - 100MT
+5.8GB - 175MT
+8.8GB - 200MT
+10.8GB - 249MT
+12.8GB - 300MT
+15.8GB - 349MT
+18.8GB - 400MT
+20.8GB - 449MT
+25.8GB - 549MT
+32.8GB - 649MT
+51.2GB - 1049MT
+60.2GB - 1249MT
+80.2GB - 1449MT
+100.2GB - 1700MT
+Observação: Pacotes mensais não compatíveis com Txuna
+
+CHAMADAS ILIMITADAS — VODACOM 📞 ♾
+
+11GB - 449MT - Ilimitadas ✨
+14.5GB - 500MT - Ilimitadas
+26.5GB - 700MT - Ilimitadas
+37.5GB - 1000MT - Ilimitadas
+53.5GB - 1500MT - Ilimitadas
+102.5GB - 2150MT - Ilimitadas
+Inclui chamadas e SMS ilimitadas para todas as redes
+
+CHAMADAS ILIMITADAS — MOVITEL 📞 ♾
+
+9GB - 469MT - Ilimitadas ✨
+23GB - 950MT - Ilimitadas
+38GB - 1450MT - Ilimitadas
+46GB - 1700MT - Ilimitadas
+53GB - 1900MT - Ilimitadas
+68GB - 2400MT - Ilimitadas
+Inclui chamadas e SMS ilimitadas para todas as redes
+
+🔹 CONEXÃO SEM LIMITES 🔹
+Internet rápida, chamadas e SMS ilimitadas.
+Pacotes exclusivos Vodacom e Movitel.
+Sempre conectado, sempre no controle!
+`,
+
+        pagamento: `💸 FORMAS DE PAGAMENTO
+
+🟠 E-Mola – Glória | 📲 860186270  
+🔴 M-Pesa – Leonor | 📲 857451196  
+
+⚠ ATENÇÃO  
+▪ Após o pagamento, envie a confirmação ✉ ** e o seu número para receber o seu pacote 📲  
+▪ Envie ** o valor exato da tabela 💰  
+
+NB: Válido apenas para Vodacom  
+🚀 Garanta seus Megabytes agora!
+`
     }
-    
 };
+
 
 
 // === FUNÇÃO GOOGLE SHEETS ===
@@ -2632,8 +2728,16 @@ async function lidParaNumero(lid) {
 
 function contemConteudoSuspeito(mensagem) {
     const texto = mensagem.toLowerCase();
-    const temLink = /(?:https?:\/\/|www\.|\.com|\.net|\.org|\.br|\.mz|bit\.ly|tinyurl|t\.me|wa\.me|whatsapp\.com|telegram\.me|link|url)/i.test(texto);
-    
+
+    // Detectar apenas URLs reais, não a palavra "link"
+    // Regex atualizado para detectar apenas links reais (http://, https://, www., ou domínios completos)
+    // Explicação:
+    // - https?://...  -> URLs com esquema
+    // - www....       -> URLs começando com www
+    // - domínio.tld    -> detectar padrões como example.com (lista de TLDs comuns)
+    // - encurtadores  -> bit.ly, tinyurl.com, t.me, wa.me, whatsapp.com, telegram.me
+    const temLink = /(?:https?:\/\/[\S]+|www\.[\S]+|(?:bit\.ly|tinyurl\.com|t\.me|wa\.me|whatsapp\.com|telegram\.me)\/[\S]+|[a-z0-9\-]+\.(?:com|net|org|io|br|co|xyz|online|info|biz|me|us|edu|gov)(?:[\/\s]|$))/i.test(texto);
+
     return {
         temLink: MODERACAO_CONFIG.detectarLinks && temLink,
         suspeito: MODERACAO_CONFIG.detectarLinks && temLink
@@ -2668,9 +2772,12 @@ async function aplicarModeracao(message, motivoDeteccao) {
     const authorId = message.author || message.from;
     
     try {
-        if (!MODERACAO_CONFIG.ativado[chatId]) {
-            return;
-        }
+        // Ativar moderação para todos os grupos que estiverem em CONFIGURACAO_GRUPOS.
+        // Se o grupo está listado em CONFIGURACAO_GRUPOS a moderação será aplicada independente de entradas conflitantes em MODERACAO_CONFIG.ativado.
+        const ativadoExplicit = CONFIGURACAO_GRUPOS.hasOwnProperty(chatId) ||
+            (MODERACAO_CONFIG.ativado && MODERACAO_CONFIG.ativado[chatId]);
+
+        if (!ativadoExplicit) return;
 
         if (MODERACAO_CONFIG.excecoes.includes(authorId) || isAdministrador(authorId)) {
             return;
@@ -2683,7 +2790,37 @@ async function aplicarModeracao(message, motivoDeteccao) {
         }
 
         if (MODERACAO_CONFIG.removerUsuario) {
-            await removerParticipante(chatId, authorId, motivoDeteccao);
+            // Tentar obter informações do contato para menção/nomes
+            let mentionId = String(authorId).replace('@c.us', '').replace('@lid', '');
+            let nomeExibicao = mentionId;
+            try {
+                const contato = await client.getContactById(authorId);
+                if (contato) {
+                    nomeExibicao = contato.pushname || contato.name || contato.number || mentionId;
+                }
+            } catch (err) {
+                // ignora erro de obtenção de contato, usaremos o ID reduzido
+            }
+
+            // Enviar aviso ao grupo antes/depois da remoção
+            try {
+                const aviso = `🚫 @${mentionId} foi removido(a) do grupo por enviar link.`;
+                await client.sendMessage(chatId, aviso, { mentions: [authorId] });
+            } catch (errAviso) {
+                // Se o envio do aviso falhar, não interromper a remoção
+                console.log('⚠️ Não foi possível enviar aviso de remoção:', errAviso.message);
+            }
+
+            const removido = await removerParticipante(chatId, authorId, motivoDeteccao);
+
+            if (!removido) {
+                try {
+                    const avisoErro = `⚠️ Não foi possível remover @${mentionId}. Verifique se o bot tem permissões de administrador.`;
+                    await client.sendMessage(chatId, avisoErro, { mentions: [authorId] });
+                } catch (err2) {
+                    console.log('⚠️ Falha ao notificar sobre remoção mal-sucedida:', err2.message);
+                }
+            }
         }
 
     } catch (error) {
@@ -3894,43 +4031,94 @@ async function processMessage(message) {
                         console.log(`📱 Número destino: ${numeroDestino}`);
                         console.log(`💎 Quantidade: ${quantidadeStr}`);
 
+                        // USAR O MESMO PADRÃO DO SISTEMA DE COMPRAS
+                        // O sistema de compras usa: message.author (ID que vem direto do WhatsApp)
+                        // Para bônus admin, usamos: mentionedIds[0] (ID da pessoa mencionada)
+                        let idParaSalvar = null;
+
                         // Verificar se é menção ou número direto
                         if (numeroDestino.startsWith('@')) {
                             console.log(`🔍 Detectada menção (@)`);
-                            // Remover @ e verificar se tem menções na mensagem
-                            const numeroMencao = numeroDestino.substring(1);
                             if (message.mentionedIds && message.mentionedIds.length > 0) {
-                                console.log(`✅ Menções encontradas: ${message.mentionedIds.join(', ')}`);
-                                // Usar a primeira menção encontrada
                                 const mencaoId = message.mentionedIds[0];
-                                // Remover AMBOS os sufixos possíveis (@c.us e @lid)
-                                numeroDestino = mencaoId.replace('@c.us', '').replace('@lid', '');
-                                console.log(`📱 Número extraído da menção: ${numeroDestino}`);
+                                console.log(`📱 ID da menção inicial: ${mencaoId}`);
+
+                                // BUSCAR O PARTICIPANTE REAL NO GRUPO
+                                try {
+                                    const chat = await message.getChat();
+                                    if (chat.isGroup && chat.participants) {
+                                        console.log(`🔍 Buscando participante real no grupo (${chat.participants.length} participantes)...`);
+
+                                        // Extrair últimos 9 dígitos do número mencionado
+                                        const numeroMencionado = mencaoId.replace('@c.us', '').replace('@lid', '');
+                                        const ultimos9 = numeroMencionado.slice(-9);
+                                        console.log(`🔍 Buscando por últimos 9 dígitos: ${ultimos9}`);
+
+                                        // Buscar TODOS os participantes que correspondem (pode haver @c.us E @lid)
+                                        const participantesEncontrados = [];
+                                        chat.participants.forEach(p => {
+                                            const pNumero = p.id._serialized.replace('@c.us', '').replace('@lid', '');
+                                            const pUltimos9 = pNumero.slice(-9);
+                                            if (pUltimos9 === ultimos9 && ultimos9.length === 9) {
+                                                participantesEncontrados.push(p.id._serialized);
+                                            }
+                                        });
+
+                                        console.log(`📋 Participantes encontrados (${participantesEncontrados.length}): ${participantesEncontrados.join(', ')}`);
+
+                                        if (participantesEncontrados.length > 0) {
+                                            // Priorizar @lid sobre @c.us (ID real do WhatsApp)
+                                            const idLid = participantesEncontrados.find(id => id.includes('@lid'));
+                                            idParaSalvar = idLid || participantesEncontrados[0];
+                                            console.log(`✅ USANDO ID: ${idParaSalvar} ${idLid ? '(@lid prioritário)' : ''}`);
+                                        } else {
+                                            idParaSalvar = mencaoId;
+                                            console.log(`⚠️ Participante não encontrado, usando ID da menção: ${idParaSalvar}`);
+                                        }
+                                    } else {
+                                        idParaSalvar = mencaoId;
+                                        console.log(`⚠️ Não é grupo, usando ID da menção: ${idParaSalvar}`);
+                                    }
+                                } catch (error) {
+                                    console.error(`❌ Erro ao buscar participante:`, error);
+                                    idParaSalvar = mencaoId;
+                                    console.log(`⚠️ Usando ID da menção por erro: ${idParaSalvar}`);
+                                }
+
+                                // Extrair número para exibição
+                                numeroDestino = idParaSalvar.replace('@c.us', '').replace('@lid', '');
+                                console.log(`📱 Número extraído para exibição: ${numeroDestino}`);
                             } else {
                                 console.log(`⚠️ Nenhuma menção encontrada, usando número após @`);
-                                // Tentar usar o número após @
+                                const numeroMencao = numeroDestino.substring(1);
                                 numeroDestino = numeroMencao;
                             }
                         }
 
-                        console.log(`🔎 Validando número: "${numeroDestino}"`);
-                        console.log(`   - Tem 9 dígitos? ${/^\d{9}$/.test(numeroDestino)}`);
-                        console.log(`   - Tem 12 dígitos? ${/^\d{12}$/.test(numeroDestino)}`);
-                        console.log(`   - É ID @lid? ${/^\d+$/.test(numeroDestino)}`);
+                        // Se não veio de menção, validar o número
+                        if (!idParaSalvar) {
+                            console.log(`🔎 Validando número: "${numeroDestino}"`);
+                            console.log(`   - Tem 9 dígitos? ${/^\d{9}$/.test(numeroDestino)}`);
+                            console.log(`   - Tem 12 dígitos? ${/^\d{12}$/.test(numeroDestino)}`);
+                            console.log(`   - É ID @lid? ${/^\d+$/.test(numeroDestino)}`);
 
-                        // Validar número - aceitar 9 dígitos, 12 dígitos ou IDs @lid (15 dígitos)
-                        if (!/^\d{9,15}$/.test(numeroDestino)) {
-                            console.log(`❌ Número INVÁLIDO: ${numeroDestino}`);
-                            await message.reply(`❌ *NÚMERO INVÁLIDO*\n\n✅ Use formato:\n• *.bonus @usuario 500MB* (com menção)\n• *.bonus @848715208 500MB* (9 dígitos)\n• *.bonus @258848715208 500MB* (12 dígitos)\n• *.bonus 848715208 500MB* (número direto)`);
-                            return;
-                        }
+                            // Validar número - aceitar 9 dígitos, 12 dígitos ou IDs @lid (15 dígitos)
+                            if (!/^\d{9,15}$/.test(numeroDestino)) {
+                                console.log(`❌ Número INVÁLIDO: ${numeroDestino}`);
+                                await message.reply(`❌ *NÚMERO INVÁLIDO*\n\n✅ Use formato:\n• *.bonus @usuario 500MB* (com menção)\n• *.bonus @848715208 500MB* (9 dígitos)\n• *.bonus @258848715208 500MB* (12 dígitos)\n• *.bonus 848715208 500MB* (número direto)`);
+                                return;
+                            }
 
-                        console.log(`✅ Número válido (${numeroDestino.length} dígitos)`);
+                            console.log(`✅ Número válido (${numeroDestino.length} dígitos)`);
 
-                        // Converter para formato completo se necessário (apenas para números de 9 dígitos)
-                        if (numeroDestino.length === 9) {
-                            numeroDestino = '258' + numeroDestino;
-                            console.log(`🔄 Convertido para 12 dígitos: ${numeroDestino}`);
+                            // Converter para formato completo se necessário (apenas para números de 9 dígitos)
+                            if (numeroDestino.length === 9) {
+                                numeroDestino = '258' + numeroDestino;
+                                console.log(`🔄 Convertido para 12 dígitos: ${numeroDestino}`);
+                            }
+
+                            // Criar ID @c.us para números digitados
+                            idParaSalvar = `${numeroDestino}@c.us`;
                         }
 
                         // Converter quantidade para MB
@@ -3959,76 +4147,88 @@ async function processMessage(message) {
                         }
 
                         console.log(`✅ Quantidade final: ${quantidadeMB}MB`);
+                        console.log(`🎯 ID para salvar bônus: ${idParaSalvar}`);
 
-                        // IMPORTANTE: Salvar com AMBOS os formatos (@c.us e @lid) para compatibilidade total
-                        const participantIdCus = `${numeroDestino}@c.us`;
-                        const participantIdLid = `${numeroDestino}@lid`;
-                        console.log(`🎯 Salvando em ambos formatos:`);
-                        console.log(`   - @c.us: ${participantIdCus}`);
-                        console.log(`   - @lid: ${participantIdLid}`);
-
-                        // Inicializar saldo para AMBOS os formatos (para garantir compatibilidade)
-                        for (const participantId of [participantIdCus, participantIdLid]) {
-                            if (!bonusSaldos[participantId]) {
-                                console.log(`🆕 Criando novo registro de bônus para ${participantId}`);
-                                bonusSaldos[participantId] = {
-                                    saldo: 0,
-                                    detalhesReferencias: {},
-                                    historicoSaques: [],
-                                    totalReferencias: 0,
-                                    bonusAdmin: []
-                                };
-                            } else {
-                                console.log(`✅ Registro existente encontrado para ${participantId} (saldo: ${bonusSaldos[participantId].saldo}MB)`);
-                            }
+                        // Inicializar saldo se necessário (IGUAL ao sistema de bônus de referência)
+                        if (!bonusSaldos[idParaSalvar]) {
+                            console.log(`🆕 Criando novo registro de bônus para ${idParaSalvar}`);
+                            bonusSaldos[idParaSalvar] = {
+                                saldo: 0,
+                                detalhesReferencias: {},
+                                historicoSaques: [],
+                                totalReferencias: 0,
+                                bonusAdmin: []
+                            };
+                        } else {
+                            console.log(`✅ Registro existente encontrado para ${idParaSalvar} (saldo: ${bonusSaldos[idParaSalvar].saldo}MB)`);
                         }
 
-                        // Adicionar bônus em AMBOS os formatos (sincronizados)
+                        // === ADICIONAR BÔNUS USANDO SISTEMABONUS (IGUAL AO SISTEMA DE REFERÊNCIA) ===
+                        console.log(`💰 Adicionando ${quantidadeMB}MB ao beneficiário...`);
+
                         let saldoAnterior = 0;
-                        for (const participantId of [participantIdCus, participantIdLid]) {
-                            saldoAnterior = bonusSaldos[participantId].saldo;
-                            bonusSaldos[participantId].saldo += quantidadeMB;
+                        let novoSaldo = 0;
+
+                        // Usar sistemaBonus se disponível (método robusto)
+                        if (sistemaBonus) {
+                            console.log(`✅ Usando SistemaBonus (método robusto)`);
+
+                            await sistemaBonus.atualizarSaldo(idParaSalvar, (saldoObj) => {
+                                saldoAnterior = saldoObj.saldo;
+                                saldoObj.saldo += quantidadeMB;
+
+                                // Registrar histórico de bônus admin
+                                if (!saldoObj.bonusAdmin) {
+                                    saldoObj.bonusAdmin = [];
+                                }
+
+                                saldoObj.bonusAdmin.push({
+                                    quantidade: quantidadeMB,
+                                    data: new Date().toISOString(),
+                                    admin: autorMensagem,
+                                    motivo: 'Bônus administrativo'
+                                });
+
+                                novoSaldo = saldoObj.saldo;
+                            });
+
+                            console.log(`💰 Saldo atualizado: ${saldoAnterior}MB → ${novoSaldo}MB (+${quantidadeMB}MB)`);
+                            console.log(`✅ Dados salvos automaticamente pelo SistemaBonus`);
+
+                        } else {
+                            // Fallback para método antigo
+                            console.log(`⚠️ SistemaBonus não disponível, usando método antigo`);
+
+                            saldoAnterior = bonusSaldos[idParaSalvar].saldo;
+                            bonusSaldos[idParaSalvar].saldo += quantidadeMB;
 
                             // Registrar histórico de bônus admin
-                            if (!bonusSaldos[participantId].bonusAdmin) {
-                                bonusSaldos[participantId].bonusAdmin = [];
+                            if (!bonusSaldos[idParaSalvar].bonusAdmin) {
+                                bonusSaldos[idParaSalvar].bonusAdmin = [];
                             }
 
-                            bonusSaldos[participantId].bonusAdmin.push({
+                            bonusSaldos[idParaSalvar].bonusAdmin.push({
                                 quantidade: quantidadeMB,
                                 data: new Date().toISOString(),
                                 admin: autorMensagem,
                                 motivo: 'Bônus administrativo'
                             });
-                        }
 
-                        console.log(`💰 Saldo atualizado em ambos formatos: ${saldoAnterior}MB → ${bonusSaldos[participantIdCus].saldo}MB (+${quantidadeMB}MB)`);
-                        console.log(`📝 Histórico de bônus admin atualizado (${bonusSaldos[participantIdCus].bonusAdmin.length} registros)`);
+                            novoSaldo = bonusSaldos[idParaSalvar].saldo;
 
-                        // DEBUG: Verificar como o beneficiário pode consultar
-                        console.log(`\n🔍 === DEBUG: COMO CONSULTAR O BÔNUS ===`);
-                        console.log(`📋 Beneficiário pode consultar com qualquer formato:`);
-                        console.log(`   1. .saldo (se estiver como ${participantIdCus})`);
-                        console.log(`   2. .saldo (se estiver como ${participantIdLid})`);
-                        console.log(`   3. .saldo (se estiver como ${numeroDestino})`);
-                        console.log(`💡 Saldos salvos:`);
-                        console.log(`   - ${participantIdCus}: ${bonusSaldos[participantIdCus]?.saldo || 0}MB`);
-                        console.log(`   - ${participantIdLid}: ${bonusSaldos[participantIdLid]?.saldo || 0}MB`);
+                            console.log(`💰 Saldo atualizado: ${saldoAnterior}MB → ${novoSaldo}MB (+${quantidadeMB}MB)`);
 
-                        // Usar @c.us como principal para referência
-                        const participantId = participantIdCus;
-
-                        // Salvar dados IMEDIATAMENTE após conceder bônus (crítico!)
-                        console.log(`💾 Salvando dados de bônus imediatamente...`);
-                        try {
-                            await salvarDadosReferencia();
-                            console.log(`✅ Dados de bônus salvos com sucesso!`);
-                        } catch (erroSalvamento) {
-                            console.error(`❌ ERRO CRÍTICO ao salvar bônus:`, erroSalvamento);
+                            // Salvar dados IMEDIATAMENTE
+                            console.log(`💾 Salvando dados de bônus imediatamente...`);
+                            try {
+                                await salvarDadosReferencia();
+                                console.log(`✅ Dados de bônus salvos com sucesso!`);
+                            } catch (erroSalvamento) {
+                                console.error(`❌ ERRO CRÍTICO ao salvar bônus:`, erroSalvamento);
+                            }
                         }
 
                         const quantidadeFormatada = quantidadeMB >= 1024 ? `${(quantidadeMB/1024).toFixed(2)}GB` : `${quantidadeMB}MB`;
-                        const novoSaldo = bonusSaldos[participantId].saldo;
                         const novoSaldoFormatado = novoSaldo >= 1024 ? `${(novoSaldo/1024).toFixed(2)}GB` : `${novoSaldo}MB`;
 
                         console.log(`🎁 ADMIN BONUS CONCEDIDO: ${autorMensagem} → ${numeroDestino} (+${quantidadeFormatada})`);
@@ -4041,20 +4241,21 @@ async function processMessage(message) {
                             `${novoSaldo >= 1024 ? '🚀 *Já podes sacar!* Use: *.sacar*' : '💡 *Continua a acumular para sacar!*'}`;
 
                         try {
-                            // Garantir que participantId tem @c.us para menção funcionar
-                            const contactIdMencao = participantId.includes('@c.us') ? participantId : `${participantId}@c.us`;
+                            // SEGUIR PADRÃO DO RANKING (linha 3635-3657)
+                            const mentionId = String(idParaSalvar).replace('@c.us', '').replace('@lid', '');
 
-                            // COPIAR EXATAMENTE O PADRÃO DAS CONFIRMAÇÕES (linha 5081)
-                            const mensagemFinal = mensagemBonus.replace('@NOME_PLACEHOLDER', `@${participantId.replace('@c.us', '').replace('@lid', '')}`);
+                            // Mensagem usa @mentionId (apenas o número)
+                            const mensagemFinal = mensagemBonus.replace('@NOME_PLACEHOLDER', `@${mentionId}`);
 
-                            // Enviar com menção igual às confirmações de compra (linha 5084-5086)
+                            // Array mentions recebe o ID completo (com @c.us ou @lid)
                             await client.sendMessage(message.from, mensagemFinal, {
-                                mentions: [contactIdMencao]
+                                mentions: [idParaSalvar]
                             });
                         } catch (notificationError) {
                             console.error('❌ Erro ao enviar notificação de bônus admin:', notificationError);
-                            // Fallback: enviar sem menção (igual às confirmações linha 5091-5092)
-                            const mensagemFallback = mensagemBonus.replace('@NOME_PLACEHOLDER', `@${participantId.replace('@c.us', '').replace('@lid', '')}`);
+                            // Fallback: enviar sem menção
+                            const mentionId = numeroDestino;
+                            const mensagemFallback = mensagemBonus.replace('@NOME_PLACEHOLDER', mentionId);
                             await message.reply(mensagemFallback);
                         }
 
@@ -4703,32 +4904,8 @@ async function processMessage(message) {
                 }
             }
 
-            // Se não encontrou padrão direto, usar IA apenas em casos específicos
-            if (texto.includes('codigo') || texto.includes('código') ||
-                texto.includes('referencia') || texto.includes('referência') ||
-                texto.includes('meu') || texto.includes('ver')) {
-
-                try {
-                    // Usar IA apenas quando necessário (economia de tokens)
-                    const prompt = `Responda apenas SIM ou NÃO. O usuário quer ver/gerar seu código de referência?
-Texto: "${texto}"
-
-Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codigo", ".meu codigo", "ver meu código", etc.`;
-
-                    const resposta = await ia.obterResposta(prompt, { maxTokens: 10 });
-                    const resultado = resposta.toLowerCase().includes('sim');
-
-                    if (resultado) {
-                        console.log(`🧠 IA DETECTOU: "${texto}" → comando meucodigo`);
-                    }
-
-                    return resultado;
-                } catch (error) {
-                    console.error('❌ Erro na detecção IA:', error);
-                    return false;
-                }
-            }
-
+            // Detecção por IA desativada (função obterResposta não implementada)
+            // A detecção por padrões acima já é suficiente
             return false;
         }
 
@@ -5697,6 +5874,103 @@ Contexto: comando normal é ".meucodigo" mas aceitar variações como "meu codig
                     `📱 Número: ${numero}\n\n` +
                     `_⏳Processando... Aguarde enquanto o Sistema executa a transferência_`
                 );
+                return;
+
+            } else if (resultadoIA.tipo === 'divisao_blocos') {
+                // === PROCESSAR DIVISÃO EM BLOCOS ===
+                console.log(`🔧 Processando divisão em blocos...`);
+
+                const dadosCompletos = resultadoIA.dadosCompletos;
+                const blocos = dadosCompletos.split('\n');
+                const valorComprovante = resultadoIA.valorComprovante;
+                const nomeContato = message._data.notifyName || 'N/A';
+                const autorMensagem = message.author || 'Desconhecido';
+
+                console.log(`📦 Total de blocos a enviar: ${blocos.length}`);
+
+                // Verificar pagamento antes de processar
+                const primeiraLinha = blocos[0].split('|');
+                const referenciaOriginal = primeiraLinha[0];
+
+                const pagamentoConfirmado = await verificarPagamentoIndividual(referenciaOriginal, valorComprovante);
+
+                if (pagamentoConfirmado === 'JA_PROCESSADO') {
+                    console.log(`⚠️ REVENDEDORES: Pagamento ${referenciaOriginal} já foi processado anteriormente!`);
+                    await message.reply(
+                        `⚠️ *PAGAMENTO JÁ PROCESSADO*\n\n` +
+                        `💰 Referência: ${referenciaOriginal}\n` +
+                        `📊 Total: ${resultadoIA.megasPorNumero}MB\n` +
+                        `📦 Blocos: ${blocos.length}\n\n` +
+                        `❌ Este pagamento já foi processado anteriormente.\n\n` +
+                        `⏰ ${new Date().toLocaleString('pt-BR')}`
+                    );
+                    return;
+                }
+
+                if (!pagamentoConfirmado) {
+                    console.log(`❌ REVENDEDORES: Pagamento não confirmado para divisão - ${referenciaOriginal} (${valorComprovante}MT)`);
+                    await message.reply(
+                        `⏳ *AGUARDANDO CONFIRMAÇÃO DE PAGAMENTO*\n\n` +
+                        `💰 Referência: ${referenciaOriginal}\n` +
+                        `📊 Total: ${resultadoIA.megasPorNumero}MB\n` +
+                        `📦 Blocos: ${blocos.length}\n` +
+                        `💳 Valor: ${valorComprovante}MT\n\n` +
+                        `📨 A mensagem de confirmação ainda não foi recebida no sistema.\n` +
+                        `🔄 Verificação automática ativa - você será notificado quando confirmado!\n` +
+                        `⏰ ${new Date().toLocaleString('pt-BR')}`
+                    );
+                    return;
+                }
+
+                console.log(`✅ REVENDEDORES: Pagamento confirmado! Enviando ${blocos.length} blocos...`);
+
+                // Enviar cada bloco para a planilha
+                let sucessos = 0;
+                let falhas = 0;
+
+                for (let i = 0; i < blocos.length; i++) {
+                    const bloco = blocos[i];
+                    const [refBloco, megasBloco, numeroBloco] = bloco.split('|');
+
+                    console.log(`📤 Enviando bloco ${i + 1}/${blocos.length}: ${refBloco} - ${megasBloco}MB`);
+
+                    const resultadoEnvio = await enviarParaTasker(refBloco, megasBloco, numeroBloco, message.from, autorMensagem);
+
+                    if (resultadoEnvio && resultadoEnvio.sucesso) {
+                        sucessos++;
+                    } else if (resultadoEnvio && resultadoEnvio.duplicado) {
+                        console.log(`⚠️ Bloco ${refBloco} já existe, continuando...`);
+                        sucessos++; // Contar como sucesso se já existe
+                    } else {
+                        falhas++;
+                        console.error(`❌ Falha ao enviar bloco ${refBloco}`);
+                    }
+
+                    // Pequeno delay entre envios
+                    if (i < blocos.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                }
+
+                // Marcar pagamento como processado após todos os blocos
+                if (sucessos > 0) {
+                    await marcarPagamentoComoProcessado(referenciaOriginal, valorComprovante);
+                }
+
+                // Registrar comprador (com megas totais)
+                const primeiroNumero = blocos[0].split('|')[2];
+                await registrarComprador(message.from, primeiroNumero, nomeContato, resultadoIA.megasPorNumero);
+
+                // Responder ao cliente (mesma mensagem padrão, sem mencionar divisão)
+                await message.reply(
+                    `✅ *Pedido Recebido!*\n\n` +
+                    `💰 Referência: ${referenciaOriginal}\n` +
+                    `📊 Megas: ${resultadoIA.megasPorNumero}\n` +
+                    `📱 Número: ${primeiroNumero}\n\n` +
+                    `_⏳Processando... Aguarde enquanto o Sistema executa a transferência_`
+                );
+
+                console.log(`✅ Divisão concluída: ${sucessos} sucessos, ${falhas} falhas`);
                 return;
             }
         }
