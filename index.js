@@ -5537,12 +5537,14 @@ async function processMessage(message) {
             const autorModeracaoMsg = message.author || message.from;
             const isAdminExecutando = isAdministrador(autorModeracaoMsg);
 
-            // Pular moderação para comandos administrativos executados por admins
-            if (!isComandoAdmin || !isAdminExecutando) {
+            // Pular moderação SOMENTE para comandos administrativos executados por admins
+            const isPularModeracao = isComandoAdmin && isAdminExecutando;
+
+            if (!isPularModeracao) {
                 const analise = contemConteudoSuspeito(message.body);
-                
+
                 if (analise.suspeito) {
-                    console.log(`🚨 Conteúdo suspeito detectado`);
+                    console.log(`🚨 Conteúdo suspeito detectado de ${autorModeracaoMsg}`);
                     await aplicarModeracao(message, "Link detectado");
                     return;
                 }
