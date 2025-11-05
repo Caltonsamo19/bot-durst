@@ -2211,6 +2211,73 @@ Sempre conectado, sempre no controle!
 NB: Válido apenas para Vodacom  
 🚀 Garanta seus Megabytes agora!
 `
+    },
+'120363419414311700@g.us': {
+        nome: '🪐Megabytes PROMO',
+        tabela: `📢🔥 SUPER PROMOÇÃO – VODACOM 🔥📢
+
+📅 PACOTES DIÁRIOS (24H ⏱ – INCLUEM ESPECIAIS)
+
+600MB – 10,00 MT
+800MB – 15,00 MT
+1024MB – 17,00 MT
+1200MB – 20,00 MT
+2048MB – 34,00 MT
+2400MB – 40,00 MT
+3072MB – 51,00 MT
+4096MB – 68,00 MT
+5120MB – 85,00 MT
+6144MB – 102,00 MT
+7168MB – 119,00 MT
+8192MB – 136,00 MT
+9144MB – 153,00 MT
+10240MB – 170,00 MT
+
+🗓 PACOTES DE 3 DIAS (RENOVÁVEIS)
+
+2000MB – 44,00 MT
+3000MB – 66,00 MT
+4000MB – 88,00 MT
+5000MB – 109,00 MT
+6000MB – 133,00 MT
+7000MB – 149,00 MT
+10000MB – 219,00 MT
+💡 Bônus: Receba 100MB extras se renovar dentro de 3 dias
+
+📆 PACOTES DE 5 DIAS (RENOVÁVEIS)
+
+1.7GB – 45,00 MT
+2.9GB – 80,00 MT
+3.4GB – 110,00 MT
+5.5GB – 150,00 MT
+7.8GB – 200,00 MT
+11.4GB – 300,00 MT
+💡 Bônus: Receba 100MB extras se renovar dentro de 5 dias
+
+🗓 PACOTES MENSAIS
+
+3.1GB – 100,00 MT
+5.1GB – 180,00 MT
+12.8GB – 250,00 MT
+22.8GB – 400,00 MT
+32.8GB – 550,00 MT
+51.2GB – 950,00 MT
+
+📞 Contacto: ‪+258 85 745 1196‬
+`,
+
+        pagamento: `💸 FORMAS DE PAGAMENTO
+
+🟠 E-Mola – Glória | 📲 860186270  
+🔴 M-Pesa – Leonor | 📲 857451196  
+
+⚠ ATENÇÃO  
+▪ Após o pagamento, envie a confirmação ✉ ** e o seu número para receber o seu pacote 📲  
+▪ Envie ** o valor exato da tabela 💰  
+
+NB: Válido apenas para Vodacom  
+🚀 Garanta seus Megabytes agora!
+`
     }
 };
 
