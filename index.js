@@ -2216,7 +2216,7 @@ NB: Válido apenas para Vodacom
         nome: '🪐Megabytes PROMO',
         tabela: `📢🔥 SUPER PROMOÇÃO – VODACOM 🔥📢
 
-📅 PACOTES DIÁRIOS (24H ⏱ – INCLUEM ESPECIAIS)
+📅 PACOTES DIÁRIOS (24H ⏱)
 
 600MB – 10,00 MT
 800MB – 15,00 MT
@@ -2263,7 +2263,10 @@ NB: Válido apenas para Vodacom
 32.8GB – 550,00 MT
 51.2GB – 950,00 MT
 
-📞 Contacto: ‪+258 85 745 1196‬
+🔹 CONEXÃO SEM LIMITES 🔹
+Internet rápida, chamadas e SMS ilimitadas.
+Pacotes exclusivos Vodacom e Movitel.
+Sempre conectado, sempre no controle!
 `,
 
         pagamento: `💸 FORMAS DE PAGAMENTO
