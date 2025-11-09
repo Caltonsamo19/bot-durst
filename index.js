@@ -174,6 +174,9 @@ const SistemaRelatorios = require('./sistema_relatorios');
 // === IMPORTAR SISTEMA DE BÔNUS ===
 const SistemaBonus = require('./sistema_bonus');
 
+// === IMPORTAR SISTEMA DE CONFIGURAÇÃO DE GRUPOS ===
+const SistemaConfigGrupos = require('./sistema_config_grupos');
+
 // === CONFIGURAÇÃO GOOGLE SHEETS - BOT RETALHO (SCRIPT PRÓPRIO) ===
 const GOOGLE_SHEETS_CONFIG = {
     scriptUrl: process.env.GOOGLE_SHEETS_SCRIPT_URL_RETALHO || 'https://script.google.com/macros/s/AKfycbyMilUC5bYKGXV95LR4MmyaRHzMf6WCmXeuztpN0tDpQ9_2qkgCxMipSVqYK_Q6twZG/exec',
@@ -184,13 +187,42 @@ const GOOGLE_SHEETS_CONFIG = {
     retryDelay: 2000
 };
 
+// === CONFIGURAÇÃO GOOGLE SHEETS - PACOTES ESPECIAIS ===
+const GOOGLE_SHEETS_CONFIG_DIAMANTE = {
+    scriptUrl: process.env.GOOGLE_SHEETS_SCRIPT_URL_DIAMANTE || 'https://script.google.com/macros/s/AKfycbw_wHnKiZROpl720GduLz-KvVw4pEtS8njzPvHCnqdWgYHFRIoXlUCxrNpqt7OnZsr8/exec',
+    timeout: 30000,
+    retryAttempts: 3,
+    retryDelay: 2000
+};
+
+// === MAPEAMENTO DE CÓDIGOS DE PACOTES ESPECIAIS ===
+const CODIGOS_PACOTES_ESPECIAIS = {
+    1: {
+        nome: 'Pacote Diamante',
+        descricao: 'Chamadas + SMS ilimitados + GB',
+        gbBase: 11, // GB base do pacote diamante
+        identificador: 'diamante',
+        emoji: '💎'
+    },
+    2: {
+        nome: 'Pacote 2.8GB',
+        descricao: 'Pacote fixo de 2.8GB',
+        gbFixo: 2.8, // GB fixo (não divide)
+        identificador: 'pacote_2_8gb',
+        emoji: '📦'
+    }
+    // Adicionar mais códigos conforme necessário:
+    // 3: { nome: 'Pacote X', ... },
+    // 4: { nome: 'Pacote Y', ... },
+};
+
 // === CONFIGURAÇÃO DE PAGAMENTOS (MESMA PLANILHA DO BOT ATACADO) ===
 const PAGAMENTOS_CONFIG = {
     scriptUrl: 'https://script.google.com/macros/s/AKfycbzzifHGu1JXc2etzG3vqK5Jd3ihtULKezUTQQIDJNsr6tXx3CmVmKkOlsld0x1Feo0H/exec',
     timeout: 30000
 };
 
-console.log(`📊 Google Sheets configurado`);
+console.log(`📊 Google Sheets configurado (Comum + Diamante)`);
 
 // Função helper para reply com fallback
 async function safeReply(message, client, texto) {
@@ -239,6 +271,151 @@ const ia = new WhatsAppAI(process.env.OPENAI_API_KEY);
 let sistemaPacotes = null;
 let sistemaCompras = null;
 let sistemaBonus = null;
+let sistemaConfigGrupos = null;
+
+// === LISTA DE BOTS PARA IGNORAR ===
+// Adicione aqui nomes de bots que devem ser ignorados
+const BOTS_IGNORADOS = [
+    'safe',
+    'bot safe',
+    'safebot',
+    'safe bot',
+    'safeguard',
+    'safeguard autodata',
+    'autodata',
+    'bot atacado',
+    'bot retalho',
+    'whatsapp bot',
+    // Adicione mais nomes aqui conforme necessário
+];
+
+// Função para verificar se é bot ignorado
+function ehBotIgnorado(contact) {
+    const nomePushname = (contact.pushname || '').toLowerCase();
+    const nomeContato = (contact.name || '').toLowerCase();
+
+    return BOTS_IGNORADOS.some(botNome =>
+        nomePushname.includes(botNome.toLowerCase()) ||
+        nomeContato.includes(botNome.toLowerCase())
+    );
+}
+
+// === SISTEMA ANTI-DUPLICATAS DE COMPROVANTES ===
+// Cache de COMPROVANTES recentes para evitar processamento duplicado
+const cacheComprovantesRecentes = new Map();
+const CACHE_COMPROVANTE_TTL = 5 * 60 * 1000; // 5 minutos
+const MAX_CACHE_SIZE = 500; // Máximo de comprovantes no cache
+
+// Função para identificar se mensagem é um comprovante M-Pesa/E-Mola
+function ehComprovante(conteudo) {
+    if (!conteudo || typeof conteudo !== 'string') return false;
+
+    const conteudoLower = conteudo.toLowerCase();
+
+    // Padrões REAIS de comprovantes M-Pesa e E-Mola
+    const iniciaComConfirmado = /^confirmado/i.test(conteudo);
+    const contemIdTransacao = /id\s*da\s*transac[aã]o/i.test(conteudo);
+    const contemTransferiste = /transferiste.*mt/i.test(conteudo);
+
+    // É comprovante se:
+    // 1. Inicia com "Confirmado" OU
+    // 2. Contém "ID da transação" OU
+    // 3. Contém "Transferiste X.XXMT"
+    return iniciaComConfirmado || contemIdTransacao || contemTransferiste;
+}
+
+// Função para gerar hash único do comprovante
+function gerarHashComprovante(remetente, conteudo) {
+    // Normalizar conteúdo (remover espaços extras, quebras de linha, etc)
+    const conteudoNormalizado = conteudo
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/[^\w\s@.-]/gi, '')
+        .trim();
+
+    return `${remetente}_${conteudoNormalizado}`;
+}
+
+// Função para verificar se COMPROVANTE é duplicado
+function ehComprovanteDuplicado(remetente, conteudo) {
+    // PRIMEIRO: Verificar se é um comprovante
+    if (!ehComprovante(conteudo)) {
+        // NÃO é comprovante, não controlar duplicatas
+        return { duplicada: false, naoEhComprovante: true };
+    }
+
+    const hashComprovante = gerarHashComprovante(remetente, conteudo);
+    const agora = Date.now();
+
+    // Verificar se comprovante já foi processado recentemente
+    const registro = cacheComprovantesRecentes.get(hashComprovante);
+
+    if (registro && (agora - registro.timestamp < CACHE_COMPROVANTE_TTL)) {
+        const tempoDecorrido = Math.floor((agora - registro.timestamp) / 1000);
+        console.log(`⚠️ COMPROVANTE DUPLICADO: De ${remetente} já processado há ${tempoDecorrido}s`);
+        return {
+            duplicada: true,
+            tempoDecorrido: tempoDecorrido,
+            primeiroEnvio: registro.timestamp
+        };
+    }
+
+    return { duplicada: false };
+}
+
+// Função para registrar comprovante processado
+function registrarComprovanteProcessado(remetente, conteudo) {
+    // Só registrar se for comprovante
+    if (!ehComprovante(conteudo)) {
+        return; // Não cachear mensagens normais
+    }
+
+    const hashComprovante = gerarHashComprovante(remetente, conteudo);
+
+    // Adicionar ao cache
+    cacheComprovantesRecentes.set(hashComprovante, {
+        timestamp: Date.now(),
+        remetente: remetente
+    });
+
+    // Limpar cache se estiver muito grande
+    if (cacheComprovantesRecentes.size > MAX_CACHE_SIZE) {
+        limparCacheComprovantesAntigos();
+    }
+}
+
+// Função para limpar comprovantes antigos do cache
+function limparCacheComprovantesAntigos() {
+    const agora = Date.now();
+    let removidos = 0;
+
+    for (const [hash, registro] of cacheComprovantesRecentes.entries()) {
+        if (agora - registro.timestamp > CACHE_COMPROVANTE_TTL) {
+            cacheComprovantesRecentes.delete(hash);
+            removidos++;
+        }
+    }
+
+    if (removidos > 0) {
+        console.log(`🧹 Cache de comprovantes limpo: ${removidos} comprovantes antigos removidos`);
+    }
+
+    // Se ainda estiver muito grande, remover as mais antigas
+    if (cacheComprovantesRecentes.size > MAX_CACHE_SIZE) {
+        const entries = Array.from(cacheComprovantesRecentes.entries());
+        entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+
+        const paraRemover = entries.slice(0, cacheComprovantesRecentes.size - MAX_CACHE_SIZE);
+        paraRemover.forEach(([hash]) => cacheComprovantesRecentes.delete(hash));
+
+        console.log(`🧹 Cache adicional: ${paraRemover.length} comprovantes mais antigos removidos`);
+    }
+}
+
+// Limpeza automática do cache a cada 10 minutos
+setInterval(() => {
+    limparCacheComprovantesAntigos();
+}, 10 * 60 * 1000);
 
 // REMOVIDO: Sistema de encaminhamento de mensagens
 // (Movido para outro bot)
@@ -319,13 +496,39 @@ const messageQueue = new MessageQueue();
 // === CACHE DE TRANSAÇÕES SIMPLIFICADO (SEGUINDO PADRÃO BOT1) ===
 let cacheTransacoes = new Map();
 
+// === CACHE DE PACOTES DIAMANTE PENDENTES (SISTEMA PARALELO) ===
+let pacotesDiamantePendentes = {};
+// Formato: {
+//     'PP250924.1129': {
+//         referencia: 'PP250924.1129',
+//         numero: '842223344',
+//         totalGB: 24,
+//         gbDiamante: 11,
+//         gbExtras: 13,
+//         divisoes: ['PP250924.112901', 'PP250924.112902'],
+//         confirmacoesRecebidas: [],
+//         grupoId: '...',
+//         grupoNome: '...',
+//         timestamp: Date.now()
+//     }
+// }
+
 // === SISTEMA DE RETRY SILENCIOSO PARA PAGAMENTOS ===
 let pagamentosPendentes = {}; // {id: {dados do pedido}}
 let timerRetryPagamentos = null;
 const ARQUIVO_PAGAMENTOS_PENDENTES = './pagamentos_pendentes.json';
-const RETRY_INTERVAL = 60000; // 60 segundos
-const RETRY_TIMEOUT = 30 * 60 * 1000; // 30 minutos
-const MAX_RETRY_ATTEMPTS = 3; // Máximo 3 tentativas por pagamento
+const RETRY_INTERVAL = 30000; // 30 segundos - verificação rápida
+const RETRY_TIMEOUT = 5 * 60 * 1000; // 5 minutos - tempo máximo de tentativas
+const MAX_RETRY_ATTEMPTS = 10; // 10 tentativas em 5 minutos (1 a cada 30s)
+
+// === CONTROLE DE RATE LIMITING ===
+let ultimaRequisicao = 0;
+const DELAY_ENTRE_REQUISICOES = 2000; // 2 segundos entre cada verificação (reduzido)
+const MAX_REQUISICOES_POR_MINUTO = 20; // Aumentado para 20 req/min
+let requisicoesUltimoMinuto = [];
+let erros429Consecutivos = 0;
+const MAX_ERROS_429 = 3; // Após 3 erros 429, pausar temporariamente
+let timeoutSalvamentoPagamentos = null; // Timer para debounce de salvamento
 
 // === SISTEMA DE REFERÊNCIAS E BÔNUS ===
 let codigosReferencia = {}; // codigo -> dados do dono
@@ -1315,9 +1518,9 @@ function gerarCodigoReferencia(remetente) {
 }
 
 // Processar bônus de compra
-async function processarBonusCompra(remetenteCompra, valorCompra) {
+async function processarBonusCompra(remetenteCompra, valorCompra, grupoId = null) {
     console.log(`🎁 Verificando bônus para compra`);
-    
+
     // Verificar se cliente tem referência
     const referencia = referenciasClientes[remetenteCompra];
     if (!referencia) {
@@ -1333,7 +1536,7 @@ async function processarBonusCompra(remetenteCompra, valorCompra) {
 
     // Atualizar contador de compras
     referencia.comprasRealizadas++;
-    
+
     // Creditar bônus ao convidador
     const convidador = referencia.convidadoPor;
     if (!bonusSaldos[convidador]) {
@@ -1348,7 +1551,7 @@ async function processarBonusCompra(remetenteCompra, valorCompra) {
     // Adicionar 200MB ao saldo
     const bonusAtual = 200;
     bonusSaldos[convidador].saldo += bonusAtual;
-    
+
     // Atualizar detalhes da referência
     if (!bonusSaldos[convidador].detalhesReferencias[remetenteCompra]) {
         bonusSaldos[convidador].detalhesReferencias[remetenteCompra] = {
@@ -1358,10 +1561,10 @@ async function processarBonusCompra(remetenteCompra, valorCompra) {
             ativo: true
         };
     }
-    
+
     bonusSaldos[convidador].detalhesReferencias[remetenteCompra].compras = referencia.comprasRealizadas;
     bonusSaldos[convidador].detalhesReferencias[remetenteCompra].bonusGanho += bonusAtual;
-    
+
     // Enviar notificação de bônus por referência
     try {
         const nomeComprador = await obterNomeContato(remetenteCompra);
@@ -1377,7 +1580,10 @@ async function processarBonusCompra(remetenteCompra, valorCompra) {
         const convidadorLimpo = convidador.replace('@c.us', '').replace('@lid', '');
         const remetenteCompraLimpo = remetenteCompra.replace('@c.us', '').replace('@lid', '');
 
-        await client.sendMessage(message.from,
+        // CORRIGIDO: Usar grupoId ou convidador como destino da mensagem
+        const destinoMensagem = grupoId || convidador;
+
+        await client.sendMessage(destinoMensagem,
             `🎉 *BÔNUS DE REFERÊNCIA CREDITADO!*\n\n` +
             `💎 @${convidadorLimpo}, recebeste *${bonusAtual}MB* de bônus!\n\n` +
             `👤 *Referenciado:* @${remetenteCompraLimpo}\n` +
@@ -1563,9 +1769,46 @@ function calcularValorPedido(megas, precosGrupo) {
     return Math.round(megasNum * valorPorMB);
 }
 
+// === FUNÇÃO PARA VERIFICAR RATE LIMIT ===
+async function aguardarRateLimit() {
+    const agora = Date.now();
+
+    // Limpar requisições antigas (mais de 1 minuto) - LIMITA TAMANHO DO ARRAY
+    requisicoesUltimoMinuto = requisicoesUltimoMinuto.filter(timestamp => agora - timestamp < 60000);
+
+    // IMPORTANTE: Limitar tamanho do array para evitar uso excessivo de memória
+    if (requisicoesUltimoMinuto.length > 50) {
+        requisicoesUltimoMinuto = requisicoesUltimoMinuto.slice(-30); // Manter apenas últimos 30
+    }
+
+    // Verificar se atingiu limite de requisições por minuto
+    if (requisicoesUltimoMinuto.length >= MAX_REQUISICOES_POR_MINUTO) {
+        const maisAntiga = requisicoesUltimoMinuto[0];
+        const tempoEspera = 60000 - (agora - maisAntiga);
+        if (tempoEspera > 0) {
+            console.log(`⏳ RATE LIMIT: Aguardando ${Math.ceil(tempoEspera/1000)}s antes de continuar...`);
+            await new Promise(resolve => setTimeout(resolve, tempoEspera));
+        }
+    }
+
+    // Aguardar delay mínimo entre requisições
+    const tempoDesdeUltima = agora - ultimaRequisicao;
+    if (tempoDesdeUltima < DELAY_ENTRE_REQUISICOES) {
+        const delayNecessario = DELAY_ENTRE_REQUISICOES - tempoDesdeUltima;
+        await new Promise(resolve => setTimeout(resolve, delayNecessario));
+    }
+
+    // Registrar requisição
+    ultimaRequisicao = Date.now();
+    requisicoesUltimoMinuto.push(ultimaRequisicao);
+}
+
 // === FUNÇÃO PARA VERIFICAR PAGAMENTO (SÓ BUSCA, NÃO MARCA) ===
 async function verificarPagamentoIndividual(referencia, valorEsperado) {
     try {
+        // AGUARDAR RATE LIMIT ANTES DE FAZER REQUISIÇÃO
+        await aguardarRateLimit();
+
         const valorNormalizado = normalizarValor(valorEsperado);
 
         console.log(`🔍 REVENDEDORES: Verificando pagamento ${referencia} - ${valorNormalizado}MT (original: ${valorEsperado})`);
@@ -1594,13 +1837,34 @@ async function verificarPagamentoIndividual(referencia, valorEsperado) {
             }
 
             console.log(`✅ REVENDEDORES: Pagamento encontrado e PENDENTE (valor exato)!`);
+            erros429Consecutivos = 0; // Resetar contador de erros 429
             return true;
         }
 
         console.log(`❌ REVENDEDORES: Pagamento não encontrado`);
+        erros429Consecutivos = 0; // Resetar contador de erros 429
         return false;
 
     } catch (error) {
+        // Detectar erro 429 (Too Many Requests)
+        if (error.response && error.response.status === 429) {
+            erros429Consecutivos++;
+            console.error(`🚨 REVENDEDORES: Rate limit atingido (429) - Erro ${erros429Consecutivos}/${MAX_ERROS_429}`);
+
+            // Pausar progressivamente baseado no número de erros
+            if (erros429Consecutivos >= MAX_ERROS_429) {
+                const pausaEmergencia = 2 * 60 * 1000; // 2 minutos (reduzido de 5)
+                console.error(`⏸️ REVENDEDORES: Pausando verificações por ${pausaEmergencia/1000}s devido a múltiplos erros 429`);
+                await new Promise(resolve => setTimeout(resolve, pausaEmergencia));
+                erros429Consecutivos = 0; // Resetar após pausa
+            } else {
+                // Pausa menor para primeiro ou segundo erro
+                const pausaCurta = 10000; // 10 segundos
+                await new Promise(resolve => setTimeout(resolve, pausaCurta));
+            }
+            return false;
+        }
+
         const ehTimeout = error.code === 'ECONNABORTED' || error.message.includes('timeout');
         if (ehTimeout) {
             console.error(`⏰ REVENDEDORES: Timeout ao verificar pagamento ${referencia} - planilha demorou muito para responder`);
@@ -1615,6 +1879,9 @@ async function verificarPagamentoIndividual(referencia, valorEsperado) {
 // === FUNÇÃO PARA MARCAR PAGAMENTO COMO PROCESSADO ===
 async function marcarPagamentoComoProcessado(referencia, valor) {
     try {
+        // AGUARDAR RATE LIMIT ANTES DE FAZER REQUISIÇÃO
+        await aguardarRateLimit();
+
         const valorNormalizado = normalizarValor(valor);
 
         console.log(`✅ REVENDEDORES: Marcando pagamento ${referencia} como PROCESSADO`);
@@ -1668,11 +1935,32 @@ async function carregarPagamentosPendentes() {
     }
 }
 
-// Salvar pagamentos pendentes no arquivo
+// Salvar pagamentos pendentes no arquivo (com debounce)
 async function salvarPagamentosPendentes() {
+    // Limpar timeout anterior
+    if (timeoutSalvamentoPagamentos) {
+        clearTimeout(timeoutSalvamentoPagamentos);
+    }
+
+    // Aguardar 2 segundos antes de salvar (agrupar múltiplas mudanças)
+    timeoutSalvamentoPagamentos = setTimeout(async () => {
+        try {
+            await fs.writeFile(ARQUIVO_PAGAMENTOS_PENDENTES, JSON.stringify(pagamentosPendentes, null, 2));
+            console.log(`💾 RETRY: Pagamentos pendentes salvos - ${Object.keys(pagamentosPendentes).length} pendências`);
+        } catch (error) {
+            console.error(`❌ RETRY: Erro ao salvar pendências:`, error);
+        }
+    }, 2000);
+}
+
+// Forçar salvamento imediato (para casos críticos)
+async function salvarPagamentosPendentesImediato() {
+    if (timeoutSalvamentoPagamentos) {
+        clearTimeout(timeoutSalvamentoPagamentos);
+    }
     try {
         await fs.writeFile(ARQUIVO_PAGAMENTOS_PENDENTES, JSON.stringify(pagamentosPendentes, null, 2));
-        console.log(`💾 RETRY: Pagamentos pendentes salvos - ${Object.keys(pagamentosPendentes).length} pendências`);
+        console.log(`💾 RETRY: Salvamento imediato - ${Object.keys(pagamentosPendentes).length} pendências`);
     } catch (error) {
         console.error(`❌ RETRY: Erro ao salvar pendências:`, error);
     }
@@ -1755,23 +2043,41 @@ async function verificarPagamentosPendentes() {
     }
 
     console.log(`🔍 RETRY: Verificando ${pendencias.length} pagamentos pendentes...`);
+    console.log(`⏱️ RATE LIMIT: Verificações com delay de ${DELAY_ENTRE_REQUISICOES/1000}s entre cada uma`);
+
+    // PROCESSAR MAIS PAGAMENTOS POR VEZ (10 em vez de 5)
+    const LOTE_MAXIMO = 10;
+    let processados = 0;
 
     for (const pendencia of pendencias) {
-        // Verificar se expirou
+        // Parar se já processou o lote máximo
+        if (processados >= LOTE_MAXIMO) {
+            console.log(`⏸️ RETRY: Processados ${processados} pagamentos neste ciclo. Restantes serão verificados no próximo.`);
+            break;
+        }
+
+        // Verificar se expirou (5 minutos)
         if (agora > pendencia.expira) {
-            console.log(`⏰ RETRY: Pagamento ${pendencia.referencia} expirou após 30min`);
+            const tempoDecorrido = Math.floor((agora - pendencia.timestamp) / 1000 / 60);
+            console.log(`⏰ RETRY: Pagamento ${pendencia.referencia} expirou após ${tempoDecorrido}min sem confirmação`);
+
+            // NOTIFICAR USUÁRIO SOBRE FALHA
+            await notificarPagamentoExpirado(pendencia);
             await removerPagamentoPendente(pendencia.id);
             continue;
         }
 
         // Verificar se atingiu limite de tentativas
         if (pendencia.tentativas >= MAX_RETRY_ATTEMPTS) {
-            console.log(`❌ RETRY: Pagamento ${pendencia.referencia} atingiu limite de ${MAX_RETRY_ATTEMPTS} tentativas - removendo da fila`);
+            console.log(`❌ RETRY: Pagamento ${pendencia.referencia} atingiu limite de ${MAX_RETRY_ATTEMPTS} tentativas`);
+
+            // NOTIFICAR USUÁRIO SOBRE FALHA
+            await notificarPagamentoExpirado(pendencia);
             await removerPagamentoPendente(pendencia.id);
             continue;
         }
 
-        // Verificar pagamento
+        // Verificar pagamento (COM RATE LIMIT AUTOMÁTICO)
         pendencia.tentativas++;
         console.log(`🔍 RETRY: Tentativa ${pendencia.tentativas}/${MAX_RETRY_ATTEMPTS} para ${pendencia.referencia}`);
 
@@ -1782,11 +2088,48 @@ async function verificarPagamentosPendentes() {
             await processarPagamentoConfirmado(pendencia);
             await removerPagamentoPendente(pendencia.id);
         }
+
+        processados++;
+    }
+
+    // Salvar progresso apenas UMA VEZ ao final (em vez de a cada verificação)
+    if (processados > 0) {
+        await salvarPagamentosPendentes();
     }
 
     // Se não há mais pendências, parar timer
     if (Object.keys(pagamentosPendentes).length === 0) {
         pararTimerRetryPagamentos();
+    }
+}
+
+// Notificar usuário quando pagamento expirar sem confirmação
+async function notificarPagamentoExpirado(pendencia) {
+    try {
+        const { chatId, referencia, valorComprovante, tentativas } = pendencia;
+        const tempoDecorrido = Math.floor((Date.now() - pendencia.timestamp) / 1000 / 60);
+
+        console.log(`📢 RETRY: Notificando usuário sobre pagamento expirado ${referencia}`);
+
+        await client.sendMessage(chatId,
+            `❌ *NÃO FOI POSSÍVEL CONFIRMAR O PAGAMENTO*\n\n` +
+            `💳 Referência: ${referencia}\n` +
+            `💰 Valor: ${valorComprovante}MT\n` +
+            `🔄 Tentativas: ${tentativas}\n` +
+            `⏰ Tempo: ${tempoDecorrido} minutos\n\n` +
+            `⚠️ *Possíveis causas:*\n` +
+            `• A mensagem de confirmação ainda não foi recebida pelo sistema\n` +
+            `• Referência incorreta no comprovante\n` +
+            `• Valor diferente do esperado\n\n` +
+            `💡 *O que fazer:*\n` +
+            `1. Aguarde mais alguns minutos e envie o comprovante novamente\n` +
+            `2. Verifique se a referência está correta\n` +
+            `3. Entre em contato com o suporte se o problema persistir\n\n` +
+            `🕐 ${new Date().toLocaleString('pt-BR')}`
+        );
+
+    } catch (error) {
+        console.error(`❌ RETRY: Erro ao notificar pagamento expirado:`, error.message);
     }
 }
 
@@ -1825,7 +2168,7 @@ async function processarPagamentoConfirmado(pendencia) {
         );
 
         // Processar bônus de referência
-        const bonusInfo = await processarBonusCompra(chatId, megas);
+        const bonusInfo = await processarBonusCompra(chatId, megas, chatId);
 
         // Enviar para Tasker/Planilha
         const resultadoEnvio = await enviarParaTasker(referencia, megas, numero, chatId, messageData.author);
@@ -1886,7 +2229,13 @@ const ADMINISTRADORES_GLOBAIS = [
     '258858891101@c.us',    // +258 85 889 1101 - Isaac
     '85307059867830@lid',   // @lid do Isaac
     '258865627840@c.us',    // +258 86 562 7840 - Ercílio
-    '170725386272876@lid'   // @lid do Ercílio
+    '170725386272876@lid',  // @lid do Ercílio
+    '258857013922@c.us',    // +258 85 701 3922 - Frederico
+    '29945149558840@lid',   // @lid do Frederico
+    '258879833297@c.us',    // +258 87 983 3297 - Astro Tech
+    '278438854287537@lid',  // @lid do Astro Tech
+    '258844093189@c.us',    // +258 84 409 3189 - Leonel
+    '67611928871020@lid'    // @lid do Leonel
 ];
 
 // Mapeamento de IDs internos (@lid) para números reais (@c.us) - SISTEMA DINÂMICO
@@ -1897,7 +2246,10 @@ let MAPEAMENTO_IDS = {
     '216054655656152@lid': '258850401416@c.us', // Kelven Junior
     '85307059867830@lid': '258858891101@c.us',  // Isaac
     '170725386272876@lid': '258865627840@c.us',  // Ercílio
-    '251032533737504@lid': '258874100607@c.us'  // Mr Durst
+    '251032533737504@lid': '258874100607@c.us', // Mr Durst
+    '67611928871020@lid': '258844093189@c.us',   // Leonel
+    '278438854287537@lid': '258879833297@c.us',  // Astro Tech
+    '29945149558840@lid': '258857013922@c.us'    // Frederico
 };
 
 // === SISTEMA AUTOMÁTICO DE MAPEAMENTO LID ===
@@ -2343,9 +2695,12 @@ async function tentarComRetry(funcao, maxTentativas = 3, delay = 2000) {
     }
 }
 async function enviarParaGoogleSheets(referencia, valor, numero, grupoId, grupoNome, autorMensagem) {
+    // AGUARDAR RATE LIMIT ANTES DE ENVIAR
+    await aguardarRateLimit();
+
     // Formato igual ao Bot Atacado: transacao já concatenada
     const transacaoFormatada = `${referencia}|${valor}|${numero}`;
-    
+
     const dados = {
         transacao: transacaoFormatada,  // Formato concatenado igual ao Bot Atacado
         grupo_id: grupoId,
@@ -2353,7 +2708,7 @@ async function enviarParaGoogleSheets(referencia, valor, numero, grupoId, grupoN
         message: `Dados enviados pelo Bot: ${transacaoFormatada}`,
         timestamp: new Date().toISOString()
     };
-    
+
     try {
         console.log(`📊 Enviando para Google Sheets: ${referencia}`);
         console.log(`🔍 Dados enviados:`, JSON.stringify(dados, null, 2));
@@ -2403,10 +2758,350 @@ async function enviarParaGoogleSheets(referencia, valor, numero, grupoId, grupoN
                 throw new Error(`Resposta inesperada: ${responseText}`);
             }
         }
-        
+
     } catch (error) {
+        // Tratar erro 429 especificamente
+        if (error.response && error.response.status === 429) {
+            erros429Consecutivos++;
+            console.error(`🚨 Google Sheets: Rate limit atingido (429) - Erro ${erros429Consecutivos}/${MAX_ERROS_429}`);
+
+            // Pausar se necessário
+            if (erros429Consecutivos >= MAX_ERROS_429) {
+                const pausaEmergencia = 2 * 60 * 1000;
+                console.error(`⏸️ Google Sheets: Pausando envios por ${pausaEmergencia/1000}s devido a múltiplos erros 429`);
+                await new Promise(resolve => setTimeout(resolve, pausaEmergencia));
+                erros429Consecutivos = 0;
+            }
+            return { sucesso: false, erro: 'Rate limit atingido, tentando novamente em instantes...' };
+        }
+
         console.error(`❌ Erro Google Sheets [${grupoNome}]: ${error.message}`);
         return { sucesso: false, erro: error.message };
+    }
+}
+
+// === FUNÇÃO PARA ENVIAR PACOTES ESPECIAIS (DIAMANTE, 2.8GB, ETC) ===
+async function enviarParaGoogleSheetsDiamante(referencia, numero, codigoPacote, grupoId, grupoNome, autorMensagem) {
+    // AGUARDAR RATE LIMIT ANTES DE ENVIAR
+    await aguardarRateLimit();
+
+    // Formato NOVO: REF|CODIGO|NUMERO
+    // CODIGO: 1=Diamante, 2=Pacote 2.8GB, etc.
+    const transacaoFormatada = `${referencia}|${codigoPacote}|${numero}`;
+
+    // Obter nome do pacote para logs
+    const infoPacote = CODIGOS_PACOTES_ESPECIAIS[codigoPacote] || { nome: 'Especial', emoji: '📦' };
+
+    const dados = {
+        transacao: transacaoFormatada,
+        grupo_id: grupoId,
+        sender: `WhatsApp-Bot-${infoPacote.nome}`,
+        message: `Pedido ${infoPacote.emoji} ${infoPacote.nome} enviado pelo Bot: ${transacaoFormatada}`,
+        timestamp: new Date().toISOString()
+    };
+
+    try {
+        console.log(`💎 Enviando para Google Sheets DIAMANTE: ${referencia}`);
+        console.log(`🔍 Dados enviados:`, JSON.stringify(dados, null, 2));
+        console.log(`🔗 URL destino:`, GOOGLE_SHEETS_CONFIG_DIAMANTE.scriptUrl);
+
+        // Usar axios COM RETRY para Google Sheets Diamante
+        const response = await axiosComRetry({
+            method: 'post',
+            url: GOOGLE_SHEETS_CONFIG_DIAMANTE.scriptUrl,
+            data: dados,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Bot-Source': 'WhatsApp-Bot-Diamante'
+            }
+        }, 3); // 3 tentativas
+
+        const responseData = response.data;
+        console.log(`📥 Resposta Google Sheets Diamante:`, JSON.stringify(responseData, null, 2));
+
+        // Verificar se é uma resposta JSON válida
+        if (typeof responseData === 'object') {
+            if (responseData.success) {
+                console.log(`✅ Google Sheets Diamante: Dados enviados!`);
+                return { sucesso: true, referencia: responseData.referencia, duplicado: false };
+            } else if (responseData.duplicado) {
+                console.log(`⚠️ Google Sheets Diamante: Pedido duplicado detectado - ${responseData.referencia} (Status: ${responseData.status_existente})`);
+                return {
+                    sucesso: false,
+                    duplicado: true,
+                    referencia: responseData.referencia,
+                    status_existente: responseData.status_existente,
+                    message: responseData.message
+                };
+            } else {
+                throw new Error(responseData.message || 'Erro desconhecido');
+            }
+        } else {
+            // Fallback para compatibilidade com resposta em texto
+            const responseText = String(responseData);
+            if (responseText.includes('Sucesso!')) {
+                console.log(`✅ Google Sheets Diamante: Dados enviados!`);
+                return { sucesso: true, row: 'N/A', duplicado: false };
+            } else if (responseText.includes('Erro:')) {
+                throw new Error(responseText);
+            } else {
+                throw new Error(`Resposta inesperada: ${responseText}`);
+            }
+        }
+
+    } catch (error) {
+        // Tratar erro 429 especificamente
+        if (error.response && error.response.status === 429) {
+            erros429Consecutivos++;
+            console.error(`🚨 Google Sheets Diamante: Rate limit atingido (429) - Erro ${erros429Consecutivos}/${MAX_ERROS_429}`);
+
+            // Pausar se necessário
+            if (erros429Consecutivos >= MAX_ERROS_429) {
+                const pausaEmergencia = 2 * 60 * 1000;
+                console.error(`⏸️ Google Sheets Diamante: Pausando envios por ${pausaEmergencia/1000}s devido a múltiplos erros 429`);
+                await new Promise(resolve => setTimeout(resolve, pausaEmergencia));
+                erros429Consecutivos = 0;
+            }
+            return { sucesso: false, erro: 'Rate limit atingido, tentando novamente em instantes...' };
+        }
+
+        console.error(`❌ Erro Google Sheets Diamante [${grupoNome}]: ${error.message}`);
+        return { sucesso: false, erro: error.message };
+    }
+}
+
+// === FUNÇÃO PARA PROCESSAR PACOTES ESPECIAIS (DIAMANTE, 2.8GB, ETC) ===
+async function processarPacoteDiamante(comprovante, configGrupo, pacoteDiamante) {
+    try {
+        const { referencia, valor, numero } = comprovante;
+        const grupoId = configGrupo.grupoId;
+        const grupoNome = configGrupo.nome;
+
+        // Identificar código do pacote baseado no tipo
+        let codigoPacote = 1; // Padrão: Diamante
+        let gbBase = 11; // GB base para divisão (padrão diamante)
+
+        // Identificar tipo de pacote especial
+        if (pacoteDiamante.isDiamante) {
+            codigoPacote = 1;
+            gbBase = CODIGOS_PACOTES_ESPECIAIS[1].gbBase;
+        } else if (pacoteDiamante.tipo === 'pacote_2_8gb' || pacoteDiamante.descricao.includes('2.8GB') || pacoteDiamante.descricao.includes('2,8GB')) {
+            codigoPacote = 2;
+            gbBase = CODIGOS_PACOTES_ESPECIAIS[2].gbFixo;
+        }
+
+        const infoPacote = CODIGOS_PACOTES_ESPECIAIS[codigoPacote];
+
+        console.log(`${infoPacote.emoji} ${infoPacote.nome.toUpperCase()}: Processando pacote especial`);
+        console.log(`${infoPacote.emoji} Ref: ${referencia} | Valor: ${valor}MT | Número: ${numero}`);
+        console.log(`${infoPacote.emoji} Pacote: ${pacoteDiamante.descricao} (${pacoteDiamante.quantidade}MB)`);
+
+        // Converter MB para GB
+        const totalGB = Math.round(pacoteDiamante.quantidade / 1024);
+        console.log(`${infoPacote.emoji} Total GB: ${totalGB}GB`);
+
+        // === CASO 1: Pacote até GB base (SIMPLES - SEM DIVISÃO) ===
+        if (totalGB <= gbBase) {
+            console.log(`${infoPacote.emoji} ${infoPacote.nome}: Pacote ≤${gbBase}GB, enviando direto para planilha especial`);
+
+            // Enviar direto para planilha de pacotes especiais
+            const resultado = await enviarParaGoogleSheetsDiamante(
+                referencia,
+                numero,
+                codigoPacote,
+                grupoId,
+                grupoNome,
+                'WhatsApp-Bot'
+            );
+
+            if (resultado.sucesso) {
+                console.log(`✅ ${infoPacote.nome}: Pacote enviado com sucesso!`);
+                return {
+                    sucesso: true,
+                    mensagem: `${infoPacote.emoji} *${infoPacote.nome.toUpperCase()} PROCESSADO*\n\n✅ Seu pacote foi enviado para processamento!\n\n📱 Número: ${numero}\n${infoPacote.emoji} Pacote: ${pacoteDiamante.descricao}\n🔖 Referência: ${referencia}\n\n⏰ Aguarde a ativação em instantes!`
+                };
+            } else {
+                throw new Error(resultado.erro || 'Erro ao enviar para planilha de pacotes especiais');
+            }
+        }
+
+        // === CASO 2: Pacote > GB base (COMPLEXO - COM DIVISÃO) ===
+        console.log(`${infoPacote.emoji} ${infoPacote.nome}: Pacote >${gbBase}GB, iniciando divisão`);
+
+        const gbDiamante = gbBase;
+        const gbExtras = totalGB - gbDiamante;
+        console.log(`${infoPacote.emoji} ${infoPacote.nome}: ${totalGB}GB = ${gbDiamante}GB (${infoPacote.identificador}) + ${gbExtras}GB (extras)`);
+
+        // Calcular divisões dos GB extras (limite 10GB por transação)
+        const divisoes = [];
+        let gbRestante = gbExtras * 1024; // Converter para MB
+        let contadorDivisao = 1;
+
+        while (gbRestante > 0) {
+            const mbDivisao = Math.min(gbRestante, 10240); // Máximo 10GB por transação
+            const refDivisao = `${referencia}${String(contadorDivisao).padStart(2, '0')}`;
+
+            divisoes.push({
+                referencia: refDivisao,
+                megas: mbDivisao,
+                numero: numero
+            });
+
+            gbRestante -= mbDivisao;
+            contadorDivisao++;
+        }
+
+        console.log(`${infoPacote.emoji} ${infoPacote.nome}: ${gbExtras}GB divididos em ${divisoes.length} transação(ões):`);
+        divisoes.forEach((div, i) => {
+            console.log(`   ${i + 1}. ${div.referencia} = ${div.megas}MB`);
+        });
+
+        // Adicionar ao cache de pacotes especiais pendentes
+        pacotesDiamantePendentes[referencia] = {
+            referencia: referencia,
+            numero: numero,
+            codigoPacote: codigoPacote,
+            totalGB: totalGB,
+            gbDiamante: gbDiamante,
+            gbExtras: gbExtras,
+            divisoes: divisoes.map(d => d.referencia),
+            confirmacoesRecebidas: [],
+            grupoId: grupoId,
+            grupoNome: grupoNome,
+            timestamp: Date.now()
+        };
+
+        console.log(`${infoPacote.emoji} ${infoPacote.nome}: Adicionado ao cache de pendentes`);
+
+        // Enviar divisões para planilha comum (sistema existente)
+        for (const divisao of divisoes) {
+            console.log(`📤 Enviando divisão: ${divisao.referencia} = ${divisao.megas}MB`);
+
+            const resultado = await enviarParaGoogleSheets(
+                divisao.referencia,
+                divisao.megas,
+                divisao.numero,
+                grupoId,
+                grupoNome,
+                'WhatsApp-Bot-Diamante-Divisao'
+            );
+
+            if (!resultado.sucesso) {
+                console.error(`❌ Erro ao enviar divisão ${divisao.referencia}`);
+                // Continuar enviando outras divisões
+            }
+        }
+
+        console.log(`✅ ${infoPacote.nome}: Todas as divisões enviadas para planilha comum`);
+        console.log(`⏳ ${infoPacote.nome}: Aguardando confirmações do bot secundário...`);
+
+        return {
+            sucesso: true,
+            mensagem: `${infoPacote.emoji} *${infoPacote.nome.toUpperCase()} PROCESSADO*\n\n✅ Seu pacote está sendo processado!\n\n📱 Número: ${numero}\n${infoPacote.emoji} Pacote: ${pacoteDiamante.descricao}\n🔖 Referência: ${referencia}\n\n📊 *Divisão:*\n• ${gbExtras}GB de megas comuns (processando...)\n• ${gbDiamante}GB + ${infoPacote.descricao} (aguardando)\n\n⏰ O ${infoPacote.nome.toLowerCase()} será ativado assim que os megas extras forem confirmados!`
+        };
+
+    } catch (error) {
+        console.error(`❌ DIAMANTE: Erro ao processar pacote:`, error.message);
+        return {
+            sucesso: false,
+            erro: error.message
+        };
+    }
+}
+
+// === FUNÇÃO PARA PROCESSAR PACOTES .8GB (12.8, 22.8, etc.) ===
+async function processarPacotePonto8(comprovante, configGrupo, pacoteDiamante) {
+    try {
+        const { referencia, valor, numero } = comprovante;
+        const grupoId = configGrupo.grupoId;
+        const grupoNome = configGrupo.nome;
+
+        console.log(`📦 PACOTE .8GB: Processando pacote especial .8GB`);
+        console.log(`📦 Ref: ${referencia} | Valor: ${valor}MT | Número: ${numero}`);
+        console.log(`📦 Pacote: ${pacoteDiamante.descricao} (${pacoteDiamante.gbTotal}GB total)`);
+
+        const totalGB = pacoteDiamante.gbTotal; // Ex: 12.8, 22.8, etc.
+        const gbComuns = totalGB - 2.8; // Ex: 10, 20, etc.
+        const gb28 = 2.8;
+
+        console.log(`📦 DIVISÃO: ${totalGB}GB = ${gbComuns}GB (comuns) + ${gb28}GB (especial código 2)`);
+
+        // === PASSO 1: Calcular divisões dos GB comuns (limite 10GB por transação) ===
+        const divisoes = [];
+        let gbRestante = gbComuns * 1024; // Converter para MB
+        let contadorDivisao = 1;
+
+        while (gbRestante > 0) {
+            const mbDivisao = Math.min(gbRestante, 10240); // Máximo 10GB por transação
+            const refDivisao = `${referencia}${String(contadorDivisao).padStart(2, '0')}`;
+
+            divisoes.push({
+                referencia: refDivisao,
+                megas: mbDivisao,
+                numero: numero
+            });
+
+            gbRestante -= mbDivisao;
+            contadorDivisao++;
+        }
+
+        console.log(`📦 ${gbComuns}GB comuns divididos em ${divisoes.length} transação(ões):`);
+        divisoes.forEach((div, i) => {
+            console.log(`   ${i + 1}. ${div.referencia} = ${div.megas}MB`);
+        });
+
+        // === PASSO 2: Adicionar ao cache de pacotes .8GB pendentes ===
+        pacotesDiamantePendentes[referencia] = {
+            referencia: referencia,
+            numero: numero,
+            codigoPacote: 2, // Código 2 para os 2.8GB
+            totalGB: totalGB,
+            gbComuns: gbComuns,
+            gb28: gb28,
+            divisoes: divisoes.map(d => d.referencia),
+            confirmacoesRecebidas: [],
+            grupoId: grupoId,
+            grupoNome: grupoNome,
+            timestamp: Date.now(),
+            tipo: 'pacote_ponto_8gb'
+        };
+
+        console.log(`📦 Adicionado ao cache de pendentes (tipo: pacote_ponto_8gb)`);
+
+        // === PASSO 3: Enviar divisões comuns para planilha comum ===
+        for (const divisao of divisoes) {
+            console.log(`📤 Enviando divisão comum: ${divisao.referencia} = ${divisao.megas}MB`);
+
+            const resultado = await enviarParaGoogleSheets(
+                divisao.referencia,
+                divisao.megas,
+                divisao.numero,
+                grupoId,
+                grupoNome,
+                'WhatsApp-Bot-Ponto8-Divisao'
+            );
+
+            if (!resultado.sucesso) {
+                console.error(`❌ Erro ao enviar divisão ${divisao.referencia}`);
+                // Continuar enviando outras divisões
+            }
+        }
+
+        console.log(`✅ PACOTE .8GB: Todas as divisões comuns enviadas`);
+        console.log(`⏳ PACOTE .8GB: Aguardando confirmações para enviar os 2.8GB especiais...`);
+
+        // === PASSO 4: Retornar mensagem ao cliente ===
+        return {
+            sucesso: true,
+            mensagem: `📦 *PACOTE ${totalGB}GB PROCESSADO*\n\n✅ Seu pacote está sendo processado!\n\n📱 Número: ${numero}\n📦 Pacote: ${pacoteDiamante.descricao}\n🔖 Referência: ${referencia}\n\n📊 *Divisão:*\n• ${gbComuns}GB comuns (processando...)\n• ${gb28}GB mensais código 2 (aguardando confirmação)\n\n⏰ O pacote completo será ativado após confirmação dos megas comuns!`
+        };
+
+    } catch (error) {
+        console.error(`❌ PACOTE .8GB: Erro ao processar:`, error.message);
+        return {
+            sucesso: false,
+            erro: error.message
+        };
     }
 }
 
@@ -2762,6 +3457,21 @@ function isGrupoMonitorado(chatId) {
 }
 
 function getConfiguracaoGrupo(chatId) {
+    // Verificar se existe configuração customizada
+    if (sistemaConfigGrupos) {
+        const configCustomizada = sistemaConfigGrupos.obterConfig(chatId);
+        if (configCustomizada && configCustomizada.tabela) {
+            // Usar config customizada, mas manter nome do padrão se existir
+            const configPadrao = CONFIGURACAO_GRUPOS[chatId];
+            return {
+                nome: configPadrao?.nome || configCustomizada.nome || 'Grupo',
+                tabela: configCustomizada.tabela,
+                pagamento: configCustomizada.pagamento || configPadrao?.pagamento || ''
+            };
+        }
+    }
+
+    // Usar configuração padrão do código
     return CONFIGURACAO_GRUPOS[chatId] || null;
 }
 
@@ -3133,6 +3843,11 @@ client.on('ready', async () => {
     sistemaBonus = new SistemaBonus();
     await sistemaBonus.carregarDados();
     console.log('💰 Sistema de Bônus ATIVADO');
+
+    // === INICIALIZAR SISTEMA DE CONFIGURAÇÃO DE GRUPOS ===
+    sistemaConfigGrupos = new SistemaConfigGrupos();
+    await sistemaConfigGrupos.carregarConfiguracoes();
+    console.log('⚙️ Sistema de Configuração de Grupos ATIVADO');
 
     // Carregar dados de referência (legado - será migrado)
     await carregarDadosReferencia();
@@ -4678,6 +5393,362 @@ async function processMessage(message) {
                 return;
             }
 
+            // === COMANDO PARA ADICIONAR NOVO GRUPO AO SISTEMA ===
+            if (comando === '.configurar') {
+                const grupoId = message.from;
+                const chat = await message.getChat();
+                const grupoNome = chat.name || 'Grupo';
+                const autorId = message.author || message.from;
+
+                // VERIFICAR SE É ADMINISTRADOR GLOBAL
+                const ehAdminGlobal = ADMINISTRADORES_GLOBAIS.includes(autorId);
+
+                if (!ehAdminGlobal) {
+                    await message.reply(
+                        `🔒 *ACESSO NEGADO*\n\n` +
+                        `⚠️ Apenas **administradores globais** podem adicionar grupos ao sistema.\n\n` +
+                        `📞 Solicite a um administrador do sistema.`
+                    );
+                    console.log(`🚫 ${autorId} tentou usar .configurar sem permissão global`);
+                    return;
+                }
+
+                // VERIFICAR SE GRUPO JÁ ESTÁ CONFIGURADO
+                const grupoJaConfigurado = CONFIGURACAO_GRUPOS.hasOwnProperty(grupoId);
+
+                if (grupoJaConfigurado) {
+                    await message.reply(
+                        `ℹ️ *GRUPO JÁ CONFIGURADO*\n\n` +
+                        `✅ Este grupo já está cadastrado no sistema.\n\n` +
+                        `📊 **Nome:** ${grupoNome}\n` +
+                        `🆔 **ID:** \`${grupoId}\`\n\n` +
+                        `💡 **Para alterar configurações:**\n` +
+                        `• \`.config-tabela\` - Alterar tabela de preços\n` +
+                        `• \`.config-pagamento\` - Alterar formas de pagamento\n` +
+                        `• \`.ver-config\` - Ver configuração atual`
+                    );
+                    return;
+                }
+
+                try {
+                    // ADICIONAR GRUPO AO SISTEMA
+                    CONFIGURACAO_GRUPOS[grupoId] = {
+                        nome: grupoNome,
+                        tabela: `📋 *TABELA DE PREÇOS*\n\n⚠️ Configure a tabela usando o comando \`.config-tabela\``,
+                        pagamento: `💳 *FORMAS DE PAGAMENTO*\n\n⚠️ Configure o pagamento usando o comando \`.config-pagamento\``
+                    };
+
+                    // Salvar também no sistema de configuração
+                    await sistemaConfigGrupos.atualizarTabela(
+                        grupoId,
+                        `📋 *TABELA DE PREÇOS*\n\n⚠️ Configure a tabela usando o comando \`.config-tabela\``,
+                        autorId,
+                        grupoNome
+                    );
+
+                    await message.reply(
+                        `✅ *GRUPO ADICIONADO AO SISTEMA!*\n\n` +
+                        `🎉 O grupo foi cadastrado com sucesso!\n\n` +
+                        `📊 **Grupo:** ${grupoNome}\n` +
+                        `🆔 **ID:** \`${grupoId}\`\n` +
+                        `👤 **Adicionado por:** Admin Global\n` +
+                        `⏰ **Data:** ${new Date().toLocaleString('pt-BR')}\n\n` +
+                        `📝 **PRÓXIMOS PASSOS:**\n\n` +
+                        `1️⃣ Configure a tabela de preços:\n` +
+                        `   \`.config-tabela\`\n` +
+                        `   \`[Cole sua tabela aqui]\`\n\n` +
+                        `2️⃣ Configure as formas de pagamento:\n` +
+                        `   \`.config-pagamento\`\n` +
+                        `   \`[Cole informações de pagamento]\`\n\n` +
+                        `3️⃣ Verifique a configuração:\n` +
+                        `   \`.ver-config\`\n\n` +
+                        `💡 **Dica:** Prepare suas tabelas em um arquivo de texto antes de colar!`
+                    );
+
+                    console.log(`✅ NOVO GRUPO ADICIONADO: ${grupoNome} (${grupoId}) por admin global ${autorId}`);
+
+                } catch (error) {
+                    await message.reply(`❌ *Erro ao adicionar grupo:* ${error.message}`);
+                    console.error('❌ Erro ao adicionar grupo:', error);
+                }
+
+                return;
+            }
+
+            // === COMANDO PARA CONFIGURAR TABELA DE PREÇOS ===
+            if (message.body.startsWith('.config-tabela ')) {
+                const grupoId = message.from;
+                const chat = await message.getChat();
+                const grupoNome = chat.name || 'Grupo';
+                const autorId = message.author || message.from;
+
+                // VERIFICAR SE É ADMINISTRADOR GLOBAL
+                const ehAdminGlobal = ADMINISTRADORES_GLOBAIS.includes(autorId);
+
+                if (!ehAdminGlobal) {
+                    await message.reply(
+                        `🔒 *ACESSO NEGADO*\n\n` +
+                        `⚠️ Apenas **administradores globais** podem alterar configurações.\n\n` +
+                        `📞 Solicite a um administrador do sistema.`
+                    );
+                    console.log(`🚫 ${autorId} tentou usar .config-tabela sem permissão global`);
+                    return;
+                }
+
+                // VERIFICAR SE GRUPO ESTÁ CONFIGURADO
+                const grupoConfigurado = CONFIGURACAO_GRUPOS.hasOwnProperty(grupoId);
+
+                if (!grupoConfigurado) {
+                    await message.reply(
+                        `❌ *GRUPO NÃO CONFIGURADO*\n\n` +
+                        `⚠️ Este grupo ainda não está cadastrado no sistema.\n\n` +
+                        `📝 **ID do grupo:** \`${grupoId}\`\n` +
+                        `📊 **Nome:** ${grupoNome}\n\n` +
+                        `💡 **Para adicionar:** Entre em contato com o desenvolvedor para adicionar este grupo ao código.`
+                    );
+                    console.log(`⚠️ Tentativa de configurar grupo não cadastrado: ${grupoNome} (${grupoId})`);
+                    return;
+                }
+
+                // Extrair tabela (tudo após ".config-tabela ")
+                const novaTabela = message.body.substring(15).trim();
+
+                console.log(`📝 Admin global ${autorId} solicitou atualização de tabela para grupo ${grupoNome}`);
+                console.log(`📏 Tamanho da tabela: ${novaTabela.length} caracteres`);
+
+                try {
+                    await message.reply('⏳ *Atualizando tabela...*');
+
+                    // Atualizar tabela (passar nome do grupo também)
+                    const resultado = await sistemaConfigGrupos.atualizarTabela(
+                        grupoId,
+                        novaTabela,
+                        autorId,
+                        grupoNome
+                    );
+
+                    if (resultado.sucesso) {
+                        // Recarregar configuração mesclada
+                        const configMesclada = sistemaConfigGrupos.mesclarComConfigPadrao(CONFIGURACAO_GRUPOS);
+                        Object.assign(CONFIGURACAO_GRUPOS, configMesclada);
+
+                        await message.reply(
+                            `✅ *TABELA ATUALIZADA COM SUCESSO!*\n\n` +
+                            `📊 **Grupo:** ${grupoNome}\n` +
+                            `📦 **Pacotes encontrados:** ${resultado.precosCont}\n` +
+                            `⏰ **Atualizado em:** ${new Date().toLocaleString('pt-BR')}\n\n` +
+                            `💡 **Para visualizar:** Digite "tabela"\n` +
+                            `🔄 **Para restaurar:** Use \`.restaurar-tabela\``
+                        );
+
+                        console.log(`✅ Tabela do grupo ${grupoNome} atualizada por admin global ${autorId}`);
+                    } else {
+                        await message.reply(
+                            `❌ *ERRO AO ATUALIZAR TABELA*\n\n` +
+                            `⚠️ ${resultado.erro}\n\n` +
+                            `💡 **Formato correto:**\n` +
+                            `\`.config-tabela\n` +
+                            `TABELA DE MEGAS\n` +
+                            `1GB = 17MT\n` +
+                            `2GB = 34MT\`\n\n` +
+                            `📝 **Dica:** Copie a tabela formatada e cole após o comando`
+                        );
+                    }
+                } catch (error) {
+                    await message.reply(`❌ *Erro inesperado:* ${error.message}`);
+                    console.error('❌ Erro ao configurar tabela:', error);
+                }
+
+                return;
+            }
+
+            // === COMANDO PARA CONFIGURAR FORMAS DE PAGAMENTO ===
+            if (message.body.startsWith('.config-pagamento ')) {
+                const grupoId = message.from;
+                const chat = await message.getChat();
+                const grupoNome = chat.name || 'Grupo';
+                const autorId = message.author || message.from;
+
+                // VERIFICAR SE É ADMINISTRADOR GLOBAL
+                const ehAdminGlobal = ADMINISTRADORES_GLOBAIS.includes(autorId);
+
+                if (!ehAdminGlobal) {
+                    await message.reply(
+                        `🔒 *ACESSO NEGADO*\n\n` +
+                        `⚠️ Apenas **administradores globais** podem alterar configurações.\n\n` +
+                        `📞 Solicite a um administrador do sistema.`
+                    );
+                    console.log(`🚫 ${autorId} tentou usar .config-pagamento sem permissão global`);
+                    return;
+                }
+
+                // VERIFICAR SE GRUPO ESTÁ CONFIGURADO
+                const grupoConfigurado = CONFIGURACAO_GRUPOS.hasOwnProperty(grupoId);
+
+                if (!grupoConfigurado) {
+                    await message.reply(
+                        `❌ *GRUPO NÃO CONFIGURADO*\n\n` +
+                        `⚠️ Este grupo ainda não está cadastrado no sistema.\n\n` +
+                        `📝 Configure primeiro com \`.config-tabela\``
+                    );
+                    return;
+                }
+
+                const novoPagamento = message.body.substring(19).trim();
+
+                try {
+                    await message.reply('⏳ *Atualizando formas de pagamento...*');
+
+                    const resultado = await sistemaConfigGrupos.atualizarPagamento(
+                        grupoId,
+                        novoPagamento,
+                        autorId
+                    );
+
+                    if (resultado.sucesso) {
+                        // Recarregar configuração
+                        const configMesclada = sistemaConfigGrupos.mesclarComConfigPadrao(CONFIGURACAO_GRUPOS);
+                        Object.assign(CONFIGURACAO_GRUPOS, configMesclada);
+
+                        await message.reply(
+                            `✅ *FORMAS DE PAGAMENTO ATUALIZADAS!*\n\n` +
+                            `📊 **Grupo:** ${grupoNome}\n` +
+                            `⏰ **Atualizado em:** ${new Date().toLocaleString('pt-BR')}`
+                        );
+
+                        console.log(`✅ Pagamento do grupo ${grupoNome} atualizado por admin global ${autorId}`);
+                    } else {
+                        await message.reply(`❌ *ERRO:* ${resultado.erro}`);
+                    }
+                } catch (error) {
+                    await message.reply(`❌ *Erro inesperado:* ${error.message}`);
+                    console.error('❌ Erro ao configurar pagamento:', error);
+                }
+
+                return;
+            }
+
+            // === COMANDO PARA VISUALIZAR CONFIGURAÇÃO ATUAL ===
+            if (comando === '.ver-config') {
+                const grupoId = message.from;
+                const chat = await message.getChat();
+                const grupoNome = chat.name || 'Grupo';
+
+                const config = sistemaConfigGrupos.obterConfig(grupoId);
+                const configPadrao = CONFIGURACAO_GRUPOS[grupoId];
+
+                let resposta = `⚙️ *CONFIGURAÇÃO DO GRUPO*\n\n`;
+                resposta += `📊 **Nome:** ${grupoNome}\n`;
+                resposta += `🆔 **ID:** \`${grupoId}\`\n\n`;
+
+                if (config) {
+                    const pacotesNaTabela = sistemaConfigGrupos.contarPrecos(config.tabela);
+                    const tabelaConfigurada = pacotesNaTabela > 0;
+                    const pagamentoConfigurado = config.pagamento && !config.pagamento.includes('Configure');
+
+                    // Status baseado na configuração
+                    if (tabelaConfigurada && pagamentoConfigurado) {
+                        resposta += `✅ **Status:** Completamente configurado\n`;
+                    } else {
+                        resposta += `⚠️ **Status:** Configuração incompleta\n`;
+                        if (!tabelaConfigurada) {
+                            resposta += `   ❌ Tabela de preços pendente\n`;
+                        }
+                        if (!pagamentoConfigurado) {
+                            resposta += `   ❌ Formas de pagamento pendentes\n`;
+                        }
+                    }
+
+                    resposta += `⏰ **Última atualização:** ${new Date(config.ultimaAtualizacao).toLocaleString('pt-BR')}\n`;
+                    resposta += `👤 **Atualizado por:** ${config.atualizadoPor}\n`;
+                    resposta += `📦 **Pacotes na tabela:** ${pacotesNaTabela}\n`;
+
+                    const historico = sistemaConfigGrupos.obterHistorico(grupoId);
+                    if (historico.sucesso) {
+                        resposta += `📜 **Histórico:** ${historico.versoes} versões salvas\n`;
+                    }
+
+                    // Mostrar o que falta fazer
+                    if (!tabelaConfigurada || !pagamentoConfigurado) {
+                        resposta += `\n📝 **PENDENTE:**\n`;
+                        if (!tabelaConfigurada) {
+                            resposta += `1️⃣ Configure a tabela: \`.config-tabela\`\n`;
+                        }
+                        if (!pagamentoConfigurado) {
+                            resposta += `2️⃣ Configure o pagamento: \`.config-pagamento\`\n`;
+                        }
+                    }
+
+                } else if (configPadrao) {
+                    const pacotesNaTabela = sistemaConfigGrupos.contarPrecos(configPadrao.tabela);
+                    resposta += `📋 **Status:** Usando configuração padrão do código\n`;
+                    resposta += `📦 **Pacotes na tabela:** ${pacotesNaTabela}`;
+                } else {
+                    resposta += `❌ **Status:** Não configurado\n\n`;
+                    resposta += `💡 **Para adicionar este grupo:**\n`;
+                    resposta += `Use o comando \`.configurar\` (apenas admin global)`;
+                }
+
+                if (configPadrao || config) {
+                    resposta += `\n\n💡 **Comandos disponíveis:**\n`;
+                    resposta += `• \`.config-tabela\` - Alterar tabela\n`;
+                    resposta += `• \`.config-pagamento\` - Alterar pagamento\n`;
+                    resposta += `• \`.restaurar-tabela\` - Restaurar versão anterior`;
+                }
+
+                await message.reply(resposta);
+                return;
+            }
+
+            // === COMANDO PARA RESTAURAR VERSÃO ANTERIOR ===
+            if (comando === '.restaurar-tabela') {
+                const grupoId = message.from;
+                const chat = await message.getChat();
+                const grupoNome = chat.name || 'Grupo';
+                const autorId = message.author || message.from;
+
+                // VERIFICAR SE É ADMINISTRADOR GLOBAL
+                const ehAdminGlobal = ADMINISTRADORES_GLOBAIS.includes(autorId);
+
+                if (!ehAdminGlobal) {
+                    await message.reply(
+                        `🔒 *ACESSO NEGADO*\n\n` +
+                        `⚠️ Apenas **administradores globais** podem restaurar configurações.\n\n` +
+                        `📞 Solicite a um administrador do sistema.`
+                    );
+                    console.log(`🚫 ${autorId} tentou usar .restaurar-tabela sem permissão global`);
+                    return;
+                }
+
+                try {
+                    await message.reply('⏳ *Restaurando versão anterior...*');
+
+                    const resultado = await sistemaConfigGrupos.restaurarVersaoAnterior(grupoId, autorId);
+
+                    if (resultado.sucesso) {
+                        // Recarregar configuração
+                        const configMesclada = sistemaConfigGrupos.mesclarComConfigPadrao(CONFIGURACAO_GRUPOS);
+                        Object.assign(CONFIGURACAO_GRUPOS, configMesclada);
+
+                        await message.reply(
+                            `✅ *VERSÃO ANTERIOR RESTAURADA!*\n\n` +
+                            `📊 **Grupo:** ${grupoNome}\n` +
+                            `⏰ **Restaurado em:** ${new Date().toLocaleString('pt-BR')}\n\n` +
+                            `💡 Digite "tabela" para visualizar`
+                        );
+
+                        console.log(`✅ Tabela do grupo ${grupoNome} restaurada por admin global ${autorId}`);
+                    } else {
+                        await message.reply(`❌ *ERRO:* ${resultado.erro}`);
+                    }
+                } catch (error) {
+                    await message.reply(`❌ *Erro inesperado:* ${error.message}`);
+                    console.error('❌ Erro ao restaurar tabela:', error);
+                }
+
+                return;
+            }
+
             if (comando === '.test_grupo') {
                 const grupoAtual = message.from;
                 const configGrupo = getConfiguracaoGrupo(grupoAtual);
@@ -5163,6 +6234,56 @@ async function processMessage(message) {
                     `🚀 *Próximo passo:* Faz tua primeira compra!`, {
                     mentions: [convidadorId]
                 });
+                return;
+            }
+
+            // .ignorados - Ver lista de bots ignorados (ADMIN ONLY)
+            if (comando === '.ignorados' || comando === '.bots') {
+                if (!isAdministrador(remetente)) {
+                    await message.reply('❌ Comando disponível apenas para administradores.');
+                    return;
+                }
+
+                const listaBots = BOTS_IGNORADOS.map((bot, index) =>
+                    `${index + 1}. ${bot}`
+                ).join('\n');
+
+                await message.reply(
+                    `🤖 *BOTS IGNORADOS*\n\n` +
+                    `O bot ignora automaticamente mensagens de:\n\n` +
+                    `${listaBots}\n\n` +
+                    `📝 Total: ${BOTS_IGNORADOS.length} bots\n\n` +
+                    `💡 Para adicionar mais bots, edite a lista BOTS_IGNORADOS no código.`
+                );
+                return;
+            }
+
+            // .cache - Ver estatísticas do cache anti-duplicatas de comprovantes (ADMIN ONLY)
+            if (comando === '.cache') {
+                if (!isAdministrador(remetente)) {
+                    await message.reply('❌ Comando disponível apenas para administradores.');
+                    return;
+                }
+
+                const totalComprovantesCache = cacheComprovantesRecentes.size;
+                const agora = Date.now();
+                let comprovantesAtivos = 0;
+
+                for (const [hash, registro] of cacheComprovantesRecentes.entries()) {
+                    if (agora - registro.timestamp < CACHE_COMPROVANTE_TTL) {
+                        comprovantesAtivos++;
+                    }
+                }
+
+                await message.reply(
+                    `🗂️ *CACHE ANTI-DUPLICATAS DE COMPROVANTES*\n\n` +
+                    `📊 Total no cache: ${totalComprovantesCache} comprovantes\n` +
+                    `✅ Ativos (< 5min): ${comprovantesAtivos}\n` +
+                    `⏰ TTL: 5 minutos\n` +
+                    `📦 Limite máximo: 500 comprovantes\n\n` +
+                    `💡 Apenas COMPROVANTES duplicados são bloqueados.\n` +
+                    `📝 Outras mensagens (comandos, números) não são controladas.`
+                );
                 return;
             }
 
@@ -5759,6 +6880,84 @@ async function processMessage(message) {
             }
         }
 
+        // === MONITORAMENTO ADICIONAL PARA PACOTES DIAMANTE ===
+        // (Só executa se não foi processado pelo sistema de compras acima)
+        if (message.body.includes('✅') && message.body.includes('Transação Concluída Com Sucesso')) {
+            const regexReferencia = /🔖\s*\*?Referência:\*?\s*([A-Za-z0-9._-]+)/i;
+            const matchReferencia = message.body.match(regexReferencia);
+
+            if (matchReferencia) {
+                const refConfirmada = matchReferencia[1];
+                console.log(`💎 DIAMANTE: Verificando se ${refConfirmada} é divisão de pacote diamante...`);
+
+                // Verificar se é divisão de pacote diamante
+                const pacoteDiamante = Object.values(pacotesDiamantePendentes).find(
+                    p => p.divisoes.includes(refConfirmada)
+                );
+
+                if (pacoteDiamante) {
+                    console.log(`💎 DIAMANTE: Confirmação de divisão detectada!`);
+                    console.log(`💎 Ref Divisão: ${refConfirmada} | Pacote Original: ${pacoteDiamante.referencia}`);
+
+                    // Adicionar à lista de confirmações recebidas (evitar duplicatas)
+                    if (!pacoteDiamante.confirmacoesRecebidas.includes(refConfirmada)) {
+                        pacoteDiamante.confirmacoesRecebidas.push(refConfirmada);
+                        console.log(`💎 DIAMANTE: Confirmação adicionada (${pacoteDiamante.confirmacoesRecebidas.length}/${pacoteDiamante.divisoes.length})`);
+                    }
+
+                    // Verificar se TODAS as divisões foram confirmadas
+                    if (pacoteDiamante.confirmacoesRecebidas.length === pacoteDiamante.divisoes.length) {
+                        // Obter informações do tipo de pacote
+                        const codigoPacote = pacoteDiamante.codigoPacote || 1;
+                        const tipoPacote = pacoteDiamante.tipo || 'diamante';
+
+                        // Para pacotes .8GB, sempre usar código 2
+                        const codigoFinal = tipoPacote === 'pacote_ponto_8gb' ? 2 : codigoPacote;
+                        const infoPacote = CODIGOS_PACOTES_ESPECIAIS[codigoFinal];
+
+                        console.log(`${infoPacote.emoji} ${tipoPacote === 'pacote_ponto_8gb' ? 'PACOTE .8GB' : infoPacote.nome}: TODAS as divisões confirmadas! Enviando para planilha...`);
+
+                        // Enviar para planilha de pacotes especiais
+                        const resultado = await enviarParaGoogleSheetsDiamante(
+                            pacoteDiamante.referencia,
+                            pacoteDiamante.numero,
+                            codigoFinal,
+                            pacoteDiamante.grupoId,
+                            pacoteDiamante.grupoNome,
+                            'WhatsApp-Bot-Diamante'
+                        );
+
+                        if (resultado.sucesso) {
+                            console.log(`✅ ${tipoPacote === 'pacote_ponto_8gb' ? 'PACOTE .8GB' : infoPacote.nome}: Pacote ${pacoteDiamante.referencia} enviado com sucesso!`);
+
+                            // Enviar mensagem ao usuário
+                            try {
+                                let mensagemFinal;
+                                if (tipoPacote === 'pacote_ponto_8gb') {
+                                    mensagemFinal = `📦 *PACOTE ${pacoteDiamante.totalGB}GB ATIVADO!*\n\n✅ Todos os megas comuns foram confirmados!\n\n📱 Número: ${pacoteDiamante.numero}\n📦 Total: ${pacoteDiamante.totalGB}GB (${pacoteDiamante.gbComuns}GB comuns + ${pacoteDiamante.gb28}GB mensais)\n🔖 Referência: ${pacoteDiamante.referencia}\n\n🎉 Seu pacote completo está sendo ativado agora!`;
+                                } else {
+                                    mensagemFinal = `${infoPacote.emoji} *${infoPacote.nome.toUpperCase()} ATIVADO!*\n\n✅ Todos os megas extras foram confirmados!\n\n📱 Número: ${pacoteDiamante.numero}\n${infoPacote.emoji} Total: ${pacoteDiamante.totalGB}GB + ${infoPacote.descricao}\n🔖 Referência: ${pacoteDiamante.referencia}\n\n🎉 Seu ${infoPacote.nome.toLowerCase()} completo está sendo ativado agora!`;
+                                }
+                                await client.sendMessage(message.from, mensagemFinal);
+                            } catch (error) {
+                                console.error(`❌ Erro ao enviar mensagem de ativação:`, error);
+                            }
+
+                            // Remover do cache
+                            delete pacotesDiamantePendentes[pacoteDiamante.referencia];
+                            console.log(`${tipoPacote === 'pacote_ponto_8gb' ? '📦 PACOTE .8GB' : infoPacote.emoji + ' ' + infoPacote.nome}: Pacote removido do cache de pendentes`);
+                        } else {
+                            console.error(`❌ ${tipoPacote === 'pacote_ponto_8gb' ? 'PACOTE .8GB' : infoPacote.nome}: Erro ao enviar para planilha: ${resultado.erro}`);
+                        }
+                    } else {
+                        const codigoPacote = pacoteDiamante.codigoPacote || 1;
+                        const infoPacote = CODIGOS_PACOTES_ESPECIAIS[codigoPacote];
+                        console.log(`⏳ ${infoPacote.nome}: Aguardando mais confirmações (${pacoteDiamante.confirmacoesRecebidas.length}/${pacoteDiamante.divisoes.length})`);
+                    }
+                }
+            }
+        }
+
         // === PROCESSAMENTO COM IA (LÓGICA SIMPLES IGUAL AO BOT ATACADO) ===
         const remetente = message.author || message.from;
         const resultadoIA = await ia.processarMensagemBot(message.body, remetente, 'texto', configGrupo);
@@ -5769,7 +6968,56 @@ async function processMessage(message) {
         }
 
         if (resultadoIA.sucesso) {
-            
+
+            // === NOVO: TRATAMENTO DE PACOTE .8GB DETECTADO ===
+            if (resultadoIA.tipo === 'comprovante_ponto8_detectado') {
+                console.log(`📦 PROCESSANDO PACOTE .8GB NO INDEX.JS`);
+
+                const { referencia, valor, numero, pacoteDiamante } = resultadoIA;
+
+                const comprovante = {
+                    referencia: referencia,
+                    valor: valor,
+                    numero: numero
+                };
+
+                const resultadoProcessamento = await processarPacotePonto8(comprovante, configGrupo, pacoteDiamante);
+
+                if (resultadoProcessamento.sucesso) {
+                    await message.reply(resultadoProcessamento.mensagem);
+                } else {
+                    await message.reply(`❌ Erro ao processar pacote .8GB: ${resultadoProcessamento.erro}`);
+                }
+
+                return;
+            }
+
+            // === NOVO: TRATAMENTO DE PACOTE DIAMANTE DETECTADO ===
+            if (resultadoIA.tipo === 'comprovante_diamante_detectado') {
+                console.log(`💎 PROCESSANDO PACOTE DIAMANTE NO INDEX.JS`);
+
+                const { referencia, valor, numero, pacoteDiamante } = resultadoIA;
+
+                // Processar pacote diamante
+                const resultado = await processarPacoteDiamante(
+                    { referencia, valor, numero },
+                    { grupoId: message.from, nome: configGrupo.nome, tabela: configGrupo.tabela },
+                    pacoteDiamante
+                );
+
+                if (resultado.sucesso) {
+                    await message.reply(resultado.mensagem);
+                } else {
+                    await message.reply(
+                        `❌ *ERRO AO PROCESSAR PACOTE DIAMANTE*\n\n` +
+                        `💰 Referência: ${referencia}\n` +
+                        `⚠️ Erro: ${resultado.erro}\n\n` +
+                        `📞 Entre em contato com o suporte.`
+                    );
+                }
+                return;
+            }
+
             if (resultadoIA.tipo === 'comprovante_recebido' || resultadoIA.tipo === 'comprovante_imagem_recebido') {
                 const metodoInfo = resultadoIA.metodo ? ` (${resultadoIA.metodo})` : '';
                 await message.reply(
@@ -5779,7 +7027,7 @@ async function processMessage(message) {
                     `📱 *Envie UM número que vai receber ${resultadoIA.megas}!*`
                 );
                 return;
-                
+
             } else if (resultadoIA.tipo === 'numero_processado_com_aviso') {
                 const dadosCompletos = resultadoIA.dadosCompletos;
                 const [referencia, megas, numero] = dadosCompletos.split('|');
@@ -5804,7 +7052,7 @@ async function processMessage(message) {
                 }
 
                 // PROCESSAR BÔNUS DE REFERÊNCIA
-                const bonusInfo = await processarBonusCompra(remetente, megas);
+                const bonusInfo = await processarBonusCompra(remetente, megas, message.from);
 
                 // VERIFICAR PAGAMENTO ANTES DE ENVIAR PARA PLANILHA
                 // Usar o valor real do comprovante (não o valor calculado dos megas)
@@ -5847,6 +7095,35 @@ async function processMessage(message) {
 
                 console.log(`✅ REVENDEDORES: Pagamento confirmado para texto! Processando...`);
 
+                // === VERIFICAR SE É PACOTE DIAMANTE ===
+                const precos = ia.extrairPrecosTabela(configGrupo.tabela);
+                const pacoteDiamante = precos.find(p => p.preco === valorComprovante && p.isDiamante === true);
+
+                if (pacoteDiamante) {
+                    console.log(`💎 DIAMANTE DETECTADO: ${pacoteDiamante.descricao} (${valorComprovante}MT)`);
+
+                    // Processar pacote diamante
+                    const resultado = await processarPacoteDiamante(
+                        { referencia, valor: valorComprovante, numero },
+                        { grupoId: message.from, nome: configGrupo.nome, tabela: configGrupo.tabela },
+                        pacoteDiamante
+                    );
+
+                    if (resultado.sucesso) {
+                        await message.reply(resultado.mensagem);
+                        await marcarPagamentoComoProcessado(referencia, valorComprovante);
+                    } else {
+                        await message.reply(
+                            `❌ *ERRO AO PROCESSAR PACOTE DIAMANTE*\n\n` +
+                            `💰 Referência: ${referencia}\n` +
+                            `⚠️ Erro: ${resultado.erro}\n\n` +
+                            `📞 Entre em contato com o suporte.`
+                        );
+                    }
+                    return; // NÃO enviar para planilha comum
+                }
+
+                // Continuar fluxo normal (pedidos comuns)
                 const resultadoEnvio = await enviarParaTasker(referencia, megas, numero, message.from, autorMensagem);
 
                 // Verificar se é pedido duplicado
@@ -5907,7 +7184,7 @@ async function processMessage(message) {
                 }
 
                 // PROCESSAR BÔNUS DE REFERÊNCIA
-                const bonusInfo = await processarBonusCompra(remetente, megas);
+                const bonusInfo = await processarBonusCompra(remetente, megas, message.from);
 
                 // VERIFICAR PAGAMENTO ANTES DE ENVIAR PARA PLANILHA
                 // Usar o valor real do comprovante (não o valor calculado dos megas)
@@ -5950,6 +7227,35 @@ async function processMessage(message) {
 
                 console.log(`✅ REVENDEDORES: Pagamento confirmado para texto! Processando...`);
 
+                // === VERIFICAR SE É PACOTE DIAMANTE ===
+                const precos = ia.extrairPrecosTabela(configGrupo.tabela);
+                const pacoteDiamante = precos.find(p => p.preco === valorComprovante && p.isDiamante === true);
+
+                if (pacoteDiamante) {
+                    console.log(`💎 DIAMANTE DETECTADO: ${pacoteDiamante.descricao} (${valorComprovante}MT)`);
+
+                    // Processar pacote diamante
+                    const resultado = await processarPacoteDiamante(
+                        { referencia, valor: valorComprovante, numero },
+                        { grupoId: message.from, nome: configGrupo.nome, tabela: configGrupo.tabela },
+                        pacoteDiamante
+                    );
+
+                    if (resultado.sucesso) {
+                        await message.reply(resultado.mensagem);
+                        await marcarPagamentoComoProcessado(referencia, valorComprovante);
+                    } else {
+                        await message.reply(
+                            `❌ *ERRO AO PROCESSAR PACOTE DIAMANTE*\n\n` +
+                            `💰 Referência: ${referencia}\n` +
+                            `⚠️ Erro: ${resultado.erro}\n\n` +
+                            `📞 Entre em contato com o suporte.`
+                        );
+                    }
+                    return; // NÃO enviar para planilha comum
+                }
+
+                // Continuar fluxo normal (pedidos comuns)
                 const resultadoEnvio = await enviarParaTasker(referencia, megas, numero, message.from, autorMensagem);
 
                 // Verificar se é pedido duplicado
@@ -6102,6 +7408,42 @@ async function processMessage(message) {
 // Novo handler principal com queue
 client.on('message', async (message) => {
     try {
+        // === FILTRO 1: IGNORAR BOTS (Safe e outros) ===
+        const contact = await message.getContact();
+        const numeroRemetente = message.author || message.from;
+
+        // Verificar se é bot ignorado
+        if (ehBotIgnorado(contact)) {
+            const nomeBotIgnorado = contact.pushname || contact.name || 'Bot desconhecido';
+            console.log(`🤖 IGNORADO: Mensagem de bot ignorado (${nomeBotIgnorado} - ${numeroRemetente})`);
+            return; // Ignora completamente
+        }
+
+        // === VERIFICAÇÃO ANTI-DUPLICATAS DE COMPROVANTES (SEGUNDO FILTRO) ===
+        const remetente = numeroRemetente;
+        const conteudo = message.body || '';
+
+        // Verificar se é COMPROVANTE duplicado (apenas comprovantes são controlados)
+        const verificacaoDuplicata = ehComprovanteDuplicado(remetente, conteudo);
+
+        if (verificacaoDuplicata.duplicada) {
+            // Comprovante duplicado detectado - responder e sair
+            console.log(`🚫 BLOQUEADO: Comprovante duplicado de ${remetente} (enviado há ${verificacaoDuplicata.tempoDecorrido}s)`);
+
+            await message.reply(
+                `⚠️ *Comprovante Duplicado*\n\n` +
+                `Você já enviou este comprovante há ${verificacaoDuplicata.tempoDecorrido} segundos.\n\n` +
+                `✅ Seu pedido já está sendo processado!\n` +
+                `🔄 *Não precisa enviar novamente*\n\n` +
+                `_Aguarde a confirmação do sistema._`
+            );
+
+            return; // Bloqueia processamento
+        }
+
+        // Registrar comprovante como processado (se for comprovante)
+        registrarComprovanteProcessado(remetente, conteudo);
+
         // LOG: Verificar se é administrador enviando mensagem em grupo
         if (message.from.endsWith('@g.us')) {
             const autorMensagem = message.author || message.from;

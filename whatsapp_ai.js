@@ -297,11 +297,11 @@ Procura por:
 INSTRUÇÕES IMPORTANTES:
 - A REFERÊNCIA pode estar QUEBRADA em múltiplas linhas. Ex: "PP250901.1250.B" + "64186" = "PP250901.1250.B64186"
 - RECONSTRÓI referências que estão separadas por quebras de linha
-- Procura por "ID da transacao", "Confirmado", "Transferiste"
+- Procura por "ID da transacao", "Confirmado", "Transferiste", "Recebeste"
 - Junta códigos que aparecem próximos e parecem ser parte da mesma referência
 - O valor pode estar em formato "100.00MT", "100MT", "100,00MT"
-- ATENÇÃO: Procura pelo valor após "Transferiste" - NÃO o saldo da conta!
-- Exemplo: "Transferiste 17.00MT" = valor é 17.00, não o saldo mencionado depois
+- ATENÇÃO: Procura pelo valor após "Transferiste" ou "Recebeste" - NÃO o saldo da conta!
+- Exemplo: "Transferiste 17.00MT" ou "Recebeste 51.00MT" = valor é 17.00 ou 51.00, não o saldo mencionado depois
 
 EXEMPLOS DE RECONSTRUÇÃO:
 - Se vês "PP250901.1250.B" e depois "64186", a referência é "PP250901.1250.B64186"
@@ -593,23 +593,51 @@ Se não conseguires extrair os dados:
           
           // Determinar tipo de pacote
           let tipo = 'diario';
-          if (linhaLower.includes('mensal') || linhaLower.includes('30 dias')) {
+          let isDiamante = false;
+          let isPacotePonto8 = false;
+
+          // Detectar pacote .8GB (12.8, 22.8, 32.8, etc.) - PRIORITÁRIO
+          if (temGB && quantidade % 1 !== 0) {
+            const parteDecimal = (quantidade % 1).toFixed(1);
+            if (parteDecimal === '0.8') {
+              tipo = 'pacote_ponto_8gb';
+              isPacotePonto8 = true;
+              isDiamante = false;
+            }
+          }
+          // Detectar pacote DIAMANTE (pelos critérios definidos)
+          else if (linha.includes('💎') ||
+              linhaLower.includes('diamante') ||
+              (linhaLower.includes('chamadas') && linhaLower.includes('sms') && linhaLower.includes('ilimitad'))) {
+            tipo = 'diamante';
+            isDiamante = true;
+          }
+          // Detectar pacote 2.8GB fixo (critério: 📦 emoji ou "2.8" ou "2.8GB")
+          else if (linha.includes('📦') ||
+                   linhaLower.includes('2.8gb') ||
+                   linhaLower.includes('2.8 gb') ||
+                   (linhaLower.includes('2.8') && (linhaLower.includes('gb') || linhaLower.includes('giga')))) {
+            tipo = 'pacote_2_8gb';
+            isDiamante = false;
+          }
+          else if (linhaLower.includes('mensal') || linhaLower.includes('30 dias')) {
             tipo = 'mensal';
           } else if (linhaLower.includes('semanal') || linhaLower.includes('7 dias')) {
             tipo = 'semanal';
-          } else if (linhaLower.includes('diamante')) {
-            tipo = 'diamante';
           } else if (linha.includes('💫')) {
             tipo = 'saldo';
           }
           
           // console.log(`     ✅ Processado: ${descricao} = ${preco}MT (${quantidadeMB}MB, ${tipo})`);
-          
+
           precos.push({
             quantidade: quantidadeMB,
             preco: preco,
             descricao: descricao,
             tipo: tipo,
+            isDiamante: isDiamante,
+            isPacotePonto8: isPacotePonto8,
+            gbTotal: temGB ? quantidade : null,
             original: linha.trim()
           });
         }
@@ -999,8 +1027,49 @@ Se não conseguires extrair os dados:
       }
       
       const valorNumerico = parseFloat(valorPago);
-      
-      // Verificar se o valor é exatamente um pacote
+
+      // === VERIFICAR SE É PACOTE ESPECIAL ANTES DE TUDO ===
+
+      // 1. Verificar se é Pacote .8GB (12.8, 22.8, etc.) - PRIORITÁRIO
+      const pacotePonto8 = precos.find(p => p.preco === valorNumerico && p.isPacotePonto8 === true);
+      if (pacotePonto8) {
+        console.log(`   📦 PACOTE .8GB DETECTADO: ${pacotePonto8.descricao} (${valorNumerico}MT)`);
+        console.log(`   ✂️ Divisão especial: ${pacotePonto8.gbTotal - 2.8}GB comuns + 2.8GB especial`);
+        return {
+          deveDividir: false,
+          isPacotePonto8: true,
+          pacoteDiamante: pacotePonto8,
+          motivo: `Pacote .8GB: ${pacotePonto8.descricao}`
+        };
+      }
+
+      // 2. Verificar se é Pacote Diamante
+      const pacoteDiamante = precos.find(p => p.preco === valorNumerico && p.isDiamante === true);
+      if (pacoteDiamante) {
+        console.log(`   💎 DIAMANTE DETECTADO: ${pacoteDiamante.descricao} (${valorNumerico}MT)`);
+        console.log(`   🚫 Divisão automática BLOQUEADA para pacote diamante`);
+        return {
+          deveDividir: false,
+          isDiamante: true,
+          pacoteDiamante: pacoteDiamante,
+          motivo: `Pacote Diamante: ${pacoteDiamante.descricao}`
+        };
+      }
+
+      // 3. Verificar se é Pacote 2.8GB fixo ou outro especial
+      const pacoteEspecial = precos.find(p => p.preco === valorNumerico && p.tipo === 'pacote_2_8gb');
+      if (pacoteEspecial) {
+        console.log(`   📦 PACOTE ESPECIAL 2.8GB DETECTADO: ${pacoteEspecial.descricao} (${valorNumerico}MT)`);
+        console.log(`   🚫 Divisão automática BLOQUEADA para pacote 2.8GB`);
+        return {
+          deveDividir: false,
+          isDiamante: true, // Usar flag isDiamante para indicar pacote especial
+          pacoteDiamante: pacoteEspecial, // Reutilizar estrutura existente
+          motivo: `Pacote Especial 2.8GB: ${pacoteEspecial.descricao}`
+        };
+      }
+
+      // 4. Verificar se o valor é exatamente um pacote comum
       const pacoteExato = precos.find(p => p.preco === valorNumerico);
       if (pacoteExato) {
         console.log(`   ⚡ Valor exato para: ${pacoteExato.descricao}`);
@@ -1422,6 +1491,39 @@ Se não conseguires extrair os dados:
       // Processar imediatamente como pedido completo
       if (configGrupo && parseFloat(comprovante.valor) >= 32) {
         const analiseAutomatica = await this.analisarDivisaoAutomatica(comprovante.valor, configGrupo);
+
+        // === VERIFICAR SE É PACOTE .8GB ===
+        if (analiseAutomatica.isPacotePonto8 && analiseAutomatica.pacoteDiamante) {
+          console.log(`   📦 Retornando pacote .8GB detectado automaticamente`);
+          return {
+            sucesso: true,
+            tipo: 'comprovante_ponto8_detectado',
+            referencia: comprovante.referencia,
+            valor: comprovante.valor,
+            valorComprovante: comprovante.valor,
+            megas: analiseAutomatica.pacoteDiamante.quantidade,
+            numero: numeros[0],
+            pacoteDiamante: analiseAutomatica.pacoteDiamante,
+            mensagem: `📦 Pacote .8GB detectado: ${analiseAutomatica.pacoteDiamante.descricao}`
+          };
+        }
+
+        // === VERIFICAR SE É PACOTE DIAMANTE ===
+        if (analiseAutomatica.isDiamante && analiseAutomatica.pacoteDiamante) {
+          console.log(`   💎 Retornando pacote diamante detectado automaticamente`);
+          return {
+            sucesso: true,
+            tipo: 'comprovante_diamante_detectado',
+            referencia: comprovante.referencia,
+            valor: comprovante.valor,
+            valorComprovante: comprovante.valor,
+            megas: analiseAutomatica.pacoteDiamante.quantidade,
+            numero: numeros[0],
+            pacoteDiamante: analiseAutomatica.pacoteDiamante,
+            mensagem: `💎 Pacote Diamante detectado: ${analiseAutomatica.pacoteDiamante.descricao}`
+          };
+        }
+
         if (analiseAutomatica.deveDividir) {
           const comprovanteComDivisao = {
             referencia: comprovante.referencia,
@@ -1431,12 +1533,35 @@ Se não conseguires extrair os dados:
             tipo: 'divisao_automatica',
             analiseAutomatica: analiseAutomatica
           };
-          
+
           return await this.processarNumerosComDivisaoAutomatica(numeros, remetente, comprovanteComDivisao);
         }
       }
       
       // Processamento normal (sem divisão automática)
+      // === VERIFICAR SE É PACOTE DIAMANTE ANTES DE CALCULAR MEGAS ===
+      if (configGrupo) {
+        const precos = this.extrairPrecosTabela(configGrupo.tabela);
+        const pacoteDiamante = precos.find(p => p.preco === comprovante.valor && p.isDiamante === true);
+
+        if (pacoteDiamante) {
+          console.log(`   💎 DIAMANTE DETECTADO NA IA: ${pacoteDiamante.descricao} (${comprovante.valor}MT)`);
+
+          // Retornar indicação de pacote diamante para o index.js processar
+          return {
+            sucesso: true,
+            tipo: 'comprovante_diamante_detectado',
+            referencia: comprovante.referencia,
+            valor: comprovante.valor,
+            valorComprovante: comprovante.valor,
+            megas: pacoteDiamante.quantidade, // MB do pacote
+            numero: numeros[0], // Primeiro número
+            pacoteDiamante: pacoteDiamante,
+            mensagem: `💎 Pacote Diamante detectado: ${pacoteDiamante.descricao}`
+          };
+        }
+      }
+
       // Calcular megas totais baseado no valor e tabela do grupo
       const megasTotais = configGrupo ? this.calcularMegasPorValor(comprovante.valor, configGrupo.tabela) : comprovante.valor;
       const LIMITE_BLOCO = 10240; // 10GB
@@ -1610,7 +1735,7 @@ Procura por:
 2. Valor transferido (em MT - Meticais)
 
 ATENÇÃO: 
-- Procura por palavras como "Confirmado", "ID da transacao", "Transferiste"
+- Procura por palavras como "Confirmado", "ID da transacao", "Transferiste", "Recebeste"
 - O valor pode estar em formato "100.00MT", "100MT", "100,00MT"
 - A referência é geralmente um código alfanumérico
 
@@ -1949,9 +2074,10 @@ Se não conseguires ler a imagem ou extrair os dados:
     }
     
     const temConfirmado = /^confirmado/i.test(mensagemLimpa);
-    const temID = /^id\s/i.test(mensagemLimpa);
-    
-    if (!temConfirmado && !temID) {
+    const temID = /^id\s|^id\sda\stransacao/i.test(mensagemLimpa);
+    const temRecebeste = /recebeste\s+\d+\.?\d*\s*mt/i.test(mensagemLimpa);
+
+    if (!temConfirmado && !temID && !temRecebeste) {
       return null;
     }
 
@@ -1962,8 +2088,12 @@ Analisa esta mensagem de comprovante de pagamento M-Pesa ou E-Mola de Moçambiqu
 
 Extrai a referência da transação e o valor transferido.
 Procura especialmente por padrões como:
-- "Confirmado [REFERENCIA]" 
+- "Confirmado [REFERENCIA]"
+- "ID da transacao: [REFERENCIA]"
 - "Transferiste [VALOR]MT"
+- "Recebeste [VALOR]MT"
+
+IMPORTANTE: O valor é o que foi transferido ou recebido, NÃO o saldo da conta!
 
 Responde APENAS no formato JSON:
 {
