@@ -486,7 +486,7 @@ class SistemaCompras {
                 blocosTotal: dadosDivisao.blocos.length,
                 divisao: true,
                 mensagem: mensagemParabenizacao ? mensagemParabenizacao.mensagem : null,
-                contactId: mensagemParabenizacao ? mensagemParabenizacao.contactId : null
+                contactId: numeroComprador // USAR numeroComprador (quem comprou) em vez do numero salvo no histórico
             };
 
         } catch (error) {

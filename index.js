@@ -94,7 +94,7 @@ setInterval(verificarSinalRestart, 10000);
 
 // === AXIOS SIMPLIFICADO (SEGUINDO PADRÃO BOT1) ===
 const axiosInstance = axios.create({
-    timeout: 60000, // 60 segundos - tolerância a conexões lentas
+    timeout: 15000, // 15 segundos - OTIMIZADO para respostas rápidas
     maxRedirects: 3,
     headers: {
         'User-Agent': 'WhatsApp-Bot/1.0'
@@ -523,8 +523,8 @@ const MAX_RETRY_ATTEMPTS = 10; // 10 tentativas em 5 minutos (1 a cada 30s)
 
 // === CONTROLE DE RATE LIMITING ===
 let ultimaRequisicao = 0;
-const DELAY_ENTRE_REQUISICOES = 2000; // 2 segundos entre cada verificação (reduzido)
-const MAX_REQUISICOES_POR_MINUTO = 20; // Aumentado para 20 req/min
+const DELAY_ENTRE_REQUISICOES = 500; // 500ms entre cada requisição (OTIMIZADO para velocidade)
+const MAX_REQUISICOES_POR_MINUTO = 40; // 40 req/min (OTIMIZADO para envios rápidos)
 let requisicoesUltimoMinuto = [];
 let erros429Consecutivos = 0;
 const MAX_ERROS_429 = 3; // Após 3 erros 429, pausar temporariamente
@@ -1521,6 +1521,80 @@ function gerarCodigoReferencia(remetente) {
 async function processarBonusCompra(remetenteCompra, valorCompra, grupoId = null) {
     console.log(`🎁 Verificando bônus para compra`);
 
+    // CORRIGIDO: Usar sistemaBonus se disponível (método robusto e persistente)
+    if (sistemaBonus) {
+        console.log(`✅ Usando SistemaBonus para processar bônus`);
+        const resultado = await sistemaBonus.processarBonusCompra(remetenteCompra, valorCompra);
+
+        if (!resultado) {
+            console.log(`   ❌ Cliente não tem referência ou já atingiu limite de compras`);
+            return false;
+        }
+
+        // Enviar notificação de bônus
+        try {
+            const nomeComprador = await obterNomeContato(remetenteCompra);
+            const convidadorId = resultado.convidadorId;
+            const bonusMB = resultado.bonusMB;
+            const comprasRealizadas = resultado.comprasRealizadas;
+
+            // Buscar saldo atualizado
+            const saldoObj = sistemaBonus.buscarSaldo(convidadorId);
+            const novoSaldo = saldoObj ? saldoObj.saldo : bonusMB;
+            const novoSaldoFormatado = novoSaldo >= 1024 ? `${(novoSaldo/1024).toFixed(2)}GB` : `${novoSaldo}MB`;
+
+            // Buscar referência para saber se é automática ou manual
+            const formatos = [
+                remetenteCompra,
+                remetenteCompra.replace('@c.us', '@lid'),
+                remetenteCompra.replace('@lid', '@c.us')
+            ];
+            let referencia = null;
+            for (const formato of formatos) {
+                if (sistemaBonus.referenciasClientes[formato]) {
+                    referencia = sistemaBonus.referenciasClientes[formato];
+                    break;
+                }
+            }
+
+            const isAutomatico = referencia?.automatico;
+            const tipoReferencia = isAutomatico ? 'adicionou ao grupo' : `usou seu código ${referencia?.codigo || ''}`;
+
+            // CORRIGIDO: Remover @lid e @c.us das menções
+            const convidadorLimpo = convidadorId.replace('@c.us', '').replace('@lid', '');
+            const remetenteCompraLimpo = remetenteCompra.replace('@c.us', '').replace('@lid', '');
+
+            // CORRIGIDO: Usar grupoId ou convidadorId como destino da mensagem
+            const destinoMensagem = grupoId || convidadorId;
+
+            await client.sendMessage(destinoMensagem,
+                `🎉 *BÔNUS DE REFERÊNCIA CREDITADO!*\n\n` +
+                `💎 @${convidadorLimpo}, recebeste *${bonusMB}MB* de bônus!\n\n` +
+                `👤 *Referenciado:* @${remetenteCompraLimpo}\n` +
+                `📢 *Motivo:* @${remetenteCompraLimpo} que você ${tipoReferencia} fez uma compra!\n` +
+                `🛒 *Compra:* ${comprasRealizadas}ª de 5\n` +
+                `💰 *Novo saldo:* ${novoSaldoFormatado}\n\n` +
+                `${novoSaldo >= 1024 ? '🚀 *Já podes sacar!* Use: *.sacar*' : '⏳ *Continua a convidar amigos para ganhar mais bônus!*'}`, {
+                mentions: [convidadorId, remetenteCompra]
+            });
+
+            console.log(`   ✅ Bônus creditado via SistemaBonus: ${bonusMB}MB (${comprasRealizadas}/5)`);
+        } catch (error) {
+            console.error('❌ Erro ao enviar notificação de bônus:', error);
+        }
+
+        return {
+            convidador: resultado.convidadorId,
+            bonusGanho: resultado.bonusMB,
+            compraAtual: resultado.comprasRealizadas,
+            totalCompras: 5,
+            novoSaldo: sistemaBonus.buscarSaldo(resultado.convidadorId)?.saldo || 0
+        };
+    }
+
+    // === FALLBACK: Sistema antigo (caso sistemaBonus não esteja disponível) ===
+    console.log(`⚠️ SistemaBonus não disponível, usando sistema antigo`);
+
     // Verificar se cliente tem referência
     const referencia = referenciasClientes[remetenteCompra];
     if (!referencia) {
@@ -2235,7 +2309,13 @@ const ADMINISTRADORES_GLOBAIS = [
     '258879833297@c.us',    // +258 87 983 3297 - Astro Tech
     '278438854287537@lid',  // @lid do Astro Tech
     '258844093189@c.us',    // +258 84 409 3189 - Leonel
-    '67611928871020@lid'    // @lid do Leonel
+    '67611928871020@lid',   // @lid do Leonel
+    '258871784594@c.us',    // +258 87 178 4594 - Shop NET
+    '49603198071035@lid',   // @lid do Shop NET
+    '258879914172@c.us',    // +258 87 991 4172 - walter
+    '40811249045561@lid',   // @lid do walter
+    '258844345161@c.us',    // +258 84 434 5161 - Mozstream's
+    '144478891450544@lid'   // @lid do Mozstream's
 ];
 
 // Mapeamento de IDs internos (@lid) para números reais (@c.us) - SISTEMA DINÂMICO
@@ -2249,7 +2329,10 @@ let MAPEAMENTO_IDS = {
     '251032533737504@lid': '258874100607@c.us', // Mr Durst
     '67611928871020@lid': '258844093189@c.us',   // Leonel
     '278438854287537@lid': '258879833297@c.us',  // Astro Tech
-    '29945149558840@lid': '258857013922@c.us'    // Frederico
+    '29945149558840@lid': '258857013922@c.us',   // Frederico
+    '49603198071035@lid': '258871784594@c.us',   // Shop NET
+    '40811249045561@lid': '258879914172@c.us',   // walter
+    '144478891450544@lid': '258844345161@c.us'   // Mozstream's
 };
 
 // === SISTEMA AUTOMÁTICO DE MAPEAMENTO LID ===
@@ -2670,6 +2753,107 @@ Sempre conectado, sempre no controle!
 NB: Válido apenas para Vodacom  
 🚀 Garanta seus Megabytes agora!
 `
+    },
+'120363420106859235@g.us': {
+        nome: 'MozStreaming MB’s v3*',
+        tabela: `📢🔥 TABELA ATUALIZADA – OUTUBRO 2025 🔥📢
+Internet e Chamadas Ilimitadas – Vodacom
+Pacotes Diários | Semanais | Mensais
+
+OFERTA ESPECIAL – 24 HORAS ⏱
+600MB - 10MT
+800MB - 15MT
+1024MB - 17MT
+1200MB - 20MT
+2048MB - 34MT
+
+PACOTES DIÁRIOS (24H ⏱)
+2400MB - 40MT
+3072MB - 51MT
+4096MB - 68MT
+5120MB - 85MT
+6144MB - 102MT
+7168MB - 119MT
+8192MB - 136MT
+9144MB - 153MT
+10240MB - 170MT
+
+PACOTES PREMIUM (3 DIAS 🗓 – RENOVÁVEIS)
+2000MB - 44MT
+3000MB - 66MT
+4000MB - 88MT
+5000MB - 109MT
+6000MB - 133MT
+7000MB - 149MT
+10000MB - 219MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 3 dias
+
+SEMANAIS BÁSICOS (5 DIAS 🗓 – RENOVÁVEIS)
+1700MB - 45MT
+2900MB - 80MT
+3400MB - 110MT
+5500MB - 150MT
+7800MB - 200MT
+11400MB - 300MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 5 dias
+
+SEMANAIS PREMIUM (15 DIAS 🗓 – RENOVÁVEIS)
+3000MB - 100MT
+5000MB - 149MT
+8000MB - 201MT
+10000MB - 231MT
+20000MB - 352MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 15 dias
+
+PACOTES MENSAIS EXCLUSIVOS (30 DIAS 📆 – NÃO RENOVÁVEIS)
+2.8GB - 100MT
+5.8GB - 175MT
+8.8GB - 200MT
+10.8GB - 249MT
+12.8GB - 300MT
+15.8GB - 349MT
+18.8GB - 400MT
+20.8GB - 449MT
+25.8GB - 549MT
+32.8GB - 649MT
+51.2GB - 1049MT
+60.2GB - 1249MT
+80.2GB - 1449MT
+100.2GB - 1700MT
+Observação: Pacotes mensais não compatíveis com Txuna
+
+CHAMADAS ILIMITADAS — VODACOM 📞 ♾
+
+11GB - 449MT - Ilimitadas ✨
+14.5GB - 500MT - Ilimitadas
+26.5GB - 700MT - Ilimitadas
+37.5GB - 1000MT - Ilimitadas
+53.5GB - 1500MT - Ilimitadas
+102.5GB - 2150MT - Ilimitadas
+Inclui chamadas e SMS ilimitadas para todas as redes
+
+CHAMADAS ILIMITADAS — MOVITEL 📞 ♾
+
+9GB - 469MT - Ilimitadas ✨
+23GB - 950MT - Ilimitadas
+38GB - 1450MT - Ilimitadas
+46GB - 1700MT - Ilimitadas
+53GB - 1900MT - Ilimitadas
+68GB - 2400MT - Ilimitadas
+Inclui chamadas e SMS ilimitadas para todas as redes
+
+🔹 CONEXÃO SEM LIMITES 🔹
+Internet rápida, chamadas e SMS ilimitadas.
+Pacotes exclusivos Vodacom e Movitel.
+Sempre conectado, sempre no controle!
+`,
+
+        pagamento: `FORMAS DE PAGAMENTO
+📱 M-Pesa: 844345161 (Elton Matusse)
+📱 E-Mola: 864524363 (Aleocha Matusse)
+
+📩 Envie o comprovativo, após o pagamento e o número que receberá os dados!
+`
     }
 };
 
@@ -3013,11 +3197,19 @@ async function processarPacoteDiamante(comprovante, configGrupo, pacoteDiamante)
 async function processarPacotePonto8(comprovante, configGrupo, pacoteDiamante) {
     try {
         const { referencia, valor, numero } = comprovante;
+
+        // Verificação de segurança para configGrupo
+        if (!configGrupo) {
+            console.error(`❌ PACOTE .8GB: configGrupo está undefined!`);
+            throw new Error('Configuração do grupo não encontrada');
+        }
+
         const grupoId = configGrupo.grupoId;
-        const grupoNome = configGrupo.nome;
+        const grupoNome = configGrupo.nome || 'Desconhecido';
 
         console.log(`📦 PACOTE .8GB: Processando pacote especial .8GB`);
         console.log(`📦 Ref: ${referencia} | Valor: ${valor}MT | Número: ${numero}`);
+        console.log(`📦 Grupo ID: ${grupoId} | Nome: ${grupoNome}`);
         console.log(`📦 Pacote: ${pacoteDiamante.descricao} (${pacoteDiamante.gbTotal}GB total)`);
 
         const totalGB = pacoteDiamante.gbTotal; // Ex: 12.8, 22.8, etc.
@@ -3218,6 +3410,88 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
                 await sistemaCompras.registrarCompraPendente(referencia, numero, valor, numeroRemetente, grupoId);
             } catch (error) {
                 console.error('❌ Erro ao registrar compra pendente:', error);
+                // Não falhar o envio por causa disso
+            }
+        }
+
+        // === DETECTAR E ATIVAR PACOTES AUTOMÁTICOS (3, 5, 15 DIAS) ===
+        if (sistemaPacotes && CONFIGURACAO_GRUPOS[grupoId]) {
+            try {
+                const tabelaGrupo = CONFIGURACAO_GRUPOS[grupoId].tabela;
+
+                // Extrair pacotes renováveis da tabela para fazer lookup
+                const pacotesRenovaveis = sistemaPacotes.extrairPacotesRenovaveis(tabelaGrupo);
+
+                // Procurar o valor em MT correspondente aos MB
+                let valorMTEncontrado = null;
+                let tipoPacoteDetectado = null;
+
+                for (const [tipoDias, listaPacotes] of Object.entries(pacotesRenovaveis)) {
+                    for (const pacote of listaPacotes) {
+                        // Comparar com tolerância de 1%
+                        if (Math.abs(pacote.mb - valor) <= (valor * 0.01)) {
+                            valorMTEncontrado = pacote.valor;
+                            tipoPacoteDetectado = tipoDias;
+                            break;
+                        }
+                    }
+                    if (tipoPacoteDetectado) break;
+                }
+
+                if (tipoPacoteDetectado && valorMTEncontrado) {
+                    console.log(`🎯 PACOTES: Detectado pacote de ${tipoPacoteDetectado} dias - Ativando automaticamente!`);
+                    console.log(`   📋 Referência: ${referencia}`);
+                    console.log(`   📱 Número: ${numero}`);
+                    console.log(`   💰 Valor: ${valorMTEncontrado}MT`);
+                    console.log(`   📊 Megas: ${valor}MB`);
+
+                    // Ativar pacote automático
+                    const resultadoPacote = await sistemaPacotes.processarComprovante(
+                        referencia,
+                        numero,
+                        grupoId,
+                        tipoPacoteDetectado,
+                        new Date() // Horário de ativação = agora
+                    );
+
+                    if (resultadoPacote.sucesso) {
+                        console.log(`✅ PACOTES: Pacote automático ativado com sucesso!`);
+                        console.log(`   📅 Primeira renovação: ${new Date(resultadoPacote.cliente.proximaRenovacao).toLocaleString('pt-BR')}`);
+
+                        // Enviar notificação ao grupo
+                        try {
+                            const primeiraRenovacaoData = new Date(resultadoPacote.cliente.proximaRenovacao);
+                            const dataExpiracao = new Date(resultadoPacote.cliente.dataExpiracao);
+                            const nomeTipoPacote = sistemaPacotes.TIPOS_PACOTES[tipoPacoteDetectado].nome;
+
+                            const mensagemNotificacao =
+                                `🎉 *PACOTE AUTOMÁTICO ATIVADO!*\n\n` +
+                                `📱 *Número:* ${numero}\n` +
+                                `📦 *Tipo:* ${nomeTipoPacote}\n` +
+                                `📊 *Pacote:* ${valor}MB\n` +
+                                `💰 *Valor:* ${valorMTEncontrado}MT\n` +
+                                `📋 *Referência:* ${referencia}\n\n` +
+                                `🔄 *Renovações Automáticas Agendadas:*\n` +
+                                `   • Total: ${tipoPacoteDetectado} renovações de 100MB\n` +
+                                `   • Primeira: ${primeiraRenovacaoData.toLocaleDateString('pt-BR')} às ${primeiraRenovacaoData.toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'})}\n` +
+                                `   • Frequência: Diária (2h antes do horário anterior)\n\n` +
+                                `📅 *Validade Total:* Até ${dataExpiracao.toLocaleDateString('pt-BR')}\n\n` +
+                                `💡 *Como funciona:*\n` +
+                                `O sistema enviará automaticamente 100MB por dia durante ${tipoPacoteDetectado} dias para manter seu pacote principal válido.\n\n` +
+                                `✨ *Total de dados:* ${valor}MB + ${parseInt(tipoPacoteDetectado) * 100}MB bônus = ${valor + (parseInt(tipoPacoteDetectado) * 100)}MB!`;
+
+                            await client.sendMessage(grupoId, mensagemNotificacao);
+                            console.log(`📢 Notificação de pacote automático enviada ao grupo!`);
+                        } catch (errorNotificacao) {
+                            console.error(`❌ Erro ao enviar notificação de pacote automático:`, errorNotificacao.message);
+                            // Não falhar a ativação por causa da notificação
+                        }
+                    } else {
+                        console.error(`❌ PACOTES: Erro ao ativar pacote automático: ${resultadoPacote.erro}`);
+                    }
+                }
+            } catch (error) {
+                console.error('❌ Erro ao detectar/ativar pacote automático:', error);
                 // Não falhar o envio por causa disso
             }
         }
@@ -3464,6 +3738,7 @@ function getConfiguracaoGrupo(chatId) {
             // Usar config customizada, mas manter nome do padrão se existir
             const configPadrao = CONFIGURACAO_GRUPOS[chatId];
             return {
+                grupoId: chatId, // ADICIONAR grupoId ao retorno
                 nome: configPadrao?.nome || configCustomizada.nome || 'Grupo',
                 tabela: configCustomizada.tabela,
                 pagamento: configCustomizada.pagamento || configPadrao?.pagamento || ''
@@ -3472,7 +3747,16 @@ function getConfiguracaoGrupo(chatId) {
     }
 
     // Usar configuração padrão do código
-    return CONFIGURACAO_GRUPOS[chatId] || null;
+    const configPadrao = CONFIGURACAO_GRUPOS[chatId];
+    if (configPadrao) {
+        // Adicionar grupoId ao objeto retornado
+        return {
+            grupoId: chatId,
+            ...configPadrao
+        };
+    }
+
+    return null;
 }
 
 // Função para resolver ID interno (@lid) para número real (@c.us)
@@ -3621,8 +3905,21 @@ async function aplicarModeracao(message, motivoDeteccao) {
 
             // Enviar aviso ao grupo antes/depois da remoção
             try {
+                // VALIDAÇÃO CRÍTICA: Verificar se é um ID válido de usuário
+                const ehIDValido = authorId &&
+                                  typeof authorId === 'string' &&
+                                  (authorId.includes('@c.us') || authorId.includes('@lid')) &&
+                                  !authorId.startsWith('SAQUE_BONUS_') &&
+                                  !authorId.startsWith('SAQ');
+
                 const aviso = `🚫 @${mentionId} foi removido(a) do grupo por enviar link.`;
-                await client.sendMessage(chatId, aviso, { mentions: [authorId] });
+
+                if (ehIDValido) {
+                    await client.sendMessage(chatId, aviso, { mentions: [authorId] });
+                } else {
+                    console.warn(`⚠️ ID inválido para menção de remoção: ${authorId}`);
+                    await client.sendMessage(chatId, aviso);
+                }
             } catch (errAviso) {
                 // Se o envio do aviso falhar, não interromper a remoção
                 console.log('⚠️ Não foi possível enviar aviso de remoção:', errAviso.message);
@@ -3632,8 +3929,21 @@ async function aplicarModeracao(message, motivoDeteccao) {
 
             if (!removido) {
                 try {
+                    // VALIDAÇÃO CRÍTICA: Verificar se é um ID válido de usuário
+                    const ehIDValido = authorId &&
+                                      typeof authorId === 'string' &&
+                                      (authorId.includes('@c.us') || authorId.includes('@lid')) &&
+                                      !authorId.startsWith('SAQUE_BONUS_') &&
+                                      !authorId.startsWith('SAQ');
+
                     const avisoErro = `⚠️ Não foi possível remover @${mentionId}. Verifique se o bot tem permissões de administrador.`;
-                    await client.sendMessage(chatId, avisoErro, { mentions: [authorId] });
+
+                    if (ehIDValido) {
+                        await client.sendMessage(chatId, avisoErro, { mentions: [authorId] });
+                    } else {
+                        console.warn(`⚠️ ID inválido para menção de erro: ${authorId}`);
+                        await client.sendMessage(chatId, avisoErro);
+                    }
                 } catch (err2) {
                     console.log('⚠️ Falha ao notificar sobre remoção mal-sucedida:', err2.message);
                 }
@@ -3851,6 +4161,37 @@ client.on('ready', async () => {
 
     // Carregar dados de referência (legado - será migrado)
     await carregarDadosReferencia();
+
+    // CORRIGIDO: Sincronizar dados legados com SistemaBonus
+    console.log('🔄 Sincronizando dados legados com SistemaBonus...');
+
+    // Sincronizar códigos de referência
+    if (Object.keys(codigosReferencia).length > 0) {
+        sistemaBonus.codigosReferencia = { ...codigosReferencia };
+        console.log(`   ✅ ${Object.keys(codigosReferencia).length} códigos sincronizados`);
+    }
+
+    // Sincronizar referências de clientes
+    if (Object.keys(referenciasClientes).length > 0) {
+        sistemaBonus.referenciasClientes = { ...referenciasClientes };
+        console.log(`   ✅ ${Object.keys(referenciasClientes).length} referências sincronizadas`);
+    }
+
+    // Sincronizar saldos de bônus (mesclar dados)
+    if (Object.keys(bonusSaldos).length > 0) {
+        for (const [clienteId, saldoLegado] of Object.entries(bonusSaldos)) {
+            const saldoNovo = sistemaBonus.buscarSaldo(clienteId);
+            if (!saldoNovo || saldoNovo.saldo === 0) {
+                // Se não existe no novo sistema ou está zerado, usar dados legados
+                sistemaBonus.bonusSaldos[clienteId] = { ...saldoLegado };
+            }
+        }
+        console.log(`   ✅ ${Object.keys(bonusSaldos).length} saldos mesclados`);
+    }
+
+    // Salvar dados sincronizados
+    await sistemaBonus.salvarDados();
+    console.log('✅ Sincronização concluída e salva!');
     
     await carregarHistorico();
     
@@ -4698,8 +5039,18 @@ async function processMessage(message) {
                         
                         mensagem += `🆕 *Total sem compras: ${semCompra.length}*\n\n`;
                         mensagem += `💡 *Dica:* Considere campanhas de incentivo para estes usuários!`;
-                        
-                        await client.sendMessage(message.from, mensagem, { mentions: mentions });
+
+                        // VALIDAÇÃO CRÍTICA: Filtrar IDs inválidos do array mentions
+                        const mentionsValidos = mentions.filter(id => {
+                            return id &&
+                                   typeof id === 'string' &&
+                                   (id.includes('@c.us') || id.includes('@lid')) &&
+                                   !id.startsWith('SAQUE_BONUS_') &&
+                                   !id.startsWith('SAQ');
+                        });
+
+                        console.log(`📊 Sem compra: ${mentions.length} mentions, ${mentionsValidos.length} válidos`);
+                        await client.sendMessage(message.from, mensagem, { mentions: mentionsValidos });
                         return;
                     } catch (error) {
                         console.error('❌ Erro ao obter sem compra:', error);
@@ -4827,7 +5178,7 @@ async function processMessage(message) {
                         console.log(`📝 Comando completo: "${comando}"`);
 
                         // Verificar permissão de admin
-                        const admins = ['258861645968', '258123456789', '258852118624', '23450974470333', '251032533737504', '203109674577958']; // Lista de admins
+                        const admins = ['258861645968', '258123456789', '258852118624', '23450974470333', '251032533737504', '203109674577958', '258879833297', '278438854287537', '258871784594', '49603198071035', '258879914172', '40811249045561', '258844345161', '144478891450544']; // Lista de admins
                         const numeroAdmin = autorMensagem.replace('@c.us', '').replace('@lid', '');
                         console.log(`🔑 Número admin processado: ${numeroAdmin}`);
                         console.log(`📋 Admins permitidos: ${admins.join(', ')}`);
@@ -5063,6 +5414,19 @@ async function processMessage(message) {
                             `${novoSaldo >= 1024 ? '🚀 *Já podes sacar!* Use: *.sacar*' : '💡 *Continua a acumular para sacar!*'}`;
 
                         try {
+                            // VALIDAÇÃO CRÍTICA: Verificar se é um ID válido de usuário
+                            const ehIDValido = idParaSalvar &&
+                                              typeof idParaSalvar === 'string' &&
+                                              (idParaSalvar.includes('@c.us') || idParaSalvar.includes('@lid')) &&
+                                              !idParaSalvar.startsWith('SAQUE_BONUS_') &&
+                                              !idParaSalvar.startsWith('SAQ');
+
+                            if (!ehIDValido) {
+                                console.warn(`⚠️ ID inválido para menção: ${idParaSalvar}`);
+                                // Usar fallback sem menção
+                                throw new Error('ID inválido para menção');
+                            }
+
                             // SEGUIR PADRÃO DO RANKING (linha 3635-3657)
                             const mentionId = String(idParaSalvar).replace('@c.us', '').replace('@lid', '');
 
@@ -6106,15 +6470,25 @@ async function processMessage(message) {
             if (!codigo) {
                 console.log(`📝 Criando NOVO código para: ${remetente}`);
                 codigo = gerarCodigoReferencia(remetente);
-                codigosReferencia[codigo] = {
+                const dadosCodigo = {
                     dono: remetente,
                     nome: message._data.notifyName || 'N/A',
                     criado: new Date().toISOString(),
                     ativo: true
                 };
 
-                // CORRIGIDO: Salvar IMEDIATAMENTE (não agendar) para garantir persistência
-                console.log(`💾 Salvando código ${codigo} IMEDIATAMENTE...`);
+                // Salvar no sistema legado
+                codigosReferencia[codigo] = dadosCodigo;
+
+                // CORRIGIDO: Sincronizar com SistemaBonus
+                if (sistemaBonus) {
+                    sistemaBonus.codigosReferencia[codigo] = { ...dadosCodigo };
+                    await sistemaBonus.salvarDados();
+                    console.log(`✅ Código ${codigo} salvo no SistemaBonus`);
+                }
+
+                // Salvar sistema legado
+                console.log(`💾 Salvando código ${codigo} no sistema legado...`);
                 await salvarDadosReferencia();
                 console.log(`✅ Código ${codigo} salvo com sucesso!`);
             }
@@ -6183,12 +6557,15 @@ async function processMessage(message) {
                 }
                 
                 // Registrar referência
-                referenciasClientes[remetente] = {
+                const dadosReferencia = {
                     convidadoPor: codigosReferencia[codigo].dono,
                     codigo: codigo,
                     dataRegistro: new Date().toISOString(),
                     comprasRealizadas: 0
                 };
+
+                // Salvar no sistema legado
+                referenciasClientes[remetente] = dadosReferencia;
 
                 const convidadorId = codigosReferencia[codigo].dono;
                 const nomeConvidador = codigosReferencia[codigo].nome;
@@ -6209,8 +6586,50 @@ async function processMessage(message) {
                 }
                 bonusSaldos[convidadorId].totalReferencias++;
 
+                // CORRIGIDO: Sincronizar com SistemaBonus
+                if (sistemaBonus) {
+                    console.log(`🔄 Sincronizando referência com SistemaBonus...`);
+
+                    // Atualizar referência em todos os formatos (compatibilidade)
+                    const formatos = [
+                        remetente,
+                        remetente.replace('@c.us', '@lid'),
+                        remetente.replace('@lid', '@c.us')
+                    ];
+
+                    formatos.forEach(formato => {
+                        sistemaBonus.referenciasClientes[formato] = { ...dadosReferencia };
+                    });
+
+                    // Atualizar código
+                    sistemaBonus.codigosReferencia[codigo] = { ...codigosReferencia[codigo] };
+
+                    // Inicializar saldo no sistemaBonus
+                    const formatosConvidador = [
+                        convidadorId,
+                        convidadorId.replace('@c.us', '@lid'),
+                        convidadorId.replace('@lid', '@c.us')
+                    ];
+
+                    formatosConvidador.forEach(formato => {
+                        if (!sistemaBonus.bonusSaldos[formato]) {
+                            sistemaBonus.bonusSaldos[formato] = {
+                                saldo: 0,
+                                detalhesReferencias: {},
+                                historicoSaques: [],
+                                totalReferencias: 0
+                            };
+                        }
+                        sistemaBonus.bonusSaldos[formato].totalReferencias++;
+                    });
+
+                    // Salvar no SistemaBonus
+                    await sistemaBonus.salvarDados();
+                    console.log(`✅ Referência sincronizada com SistemaBonus`);
+                }
+
                 // CORRIGIDO: Salvar IMEDIATAMENTE para garantir persistência
-                console.log(`💾 Salvando uso do código ${codigo} IMEDIATAMENTE...`);
+                console.log(`💾 Salvando uso do código ${codigo} no sistema legado...`);
                 await salvarDadosReferencia();
 
                 // Salvar arquivo de membros se foi atualizado
@@ -6409,22 +6828,7 @@ async function processMessage(message) {
                     return;
                 }
 
-                // Verificar limite diário de saques
-                const hoje = new Date().toDateString();
-                const saquesHoje = Object.values(pedidosSaque).filter(s =>
-                    s.cliente === remetente &&
-                    new Date(s.dataSolicitacao).toDateString() === hoje
-                );
-
-                if (saquesHoje.length >= 3) {
-                    await message.reply(
-                        `❌ *LIMITE DIÁRIO ATINGIDO*\n\n` +
-                        `🚫 Limite: 3 saques por dia\n` +
-                        `📊 Já solicitados hoje: ${saquesHoje.length}\n\n` +
-                        `⏰ Tente novamente amanhã!`
-                    );
-                    return;
-                }
+                // Limite diário de saques REMOVIDO - Agora sem limite!
 
                 // === GERAR REFERÊNCIA ÚNICA PARA SAQUE ===
                 const agora = new Date();
@@ -6847,17 +7251,31 @@ async function processMessage(message) {
                 console.log(`🛒 CONFIRMAÇÃO BOT: Detectada transação concluída - Ref: ${referenciaConfirmada} | Número: ${numeroConfirmado}`);
                 console.log(`🔍 CONFIRMAÇÃO BOT: Tipo detectado: ${/emola|e-mola/i.test(message.body) ? 'EMOLA' : /mpesa|m-pesa/i.test(message.body) ? 'MPESA' : 'DESCONHECIDO'}`);
                 
-                // Processar confirmação
+                // Processar confirmação no sistema de compras
                 const resultadoConfirmacao = await sistemaCompras.processarConfirmacao(referenciaConfirmada, numeroConfirmado);
-                
+
                 if (resultadoConfirmacao) {
                     console.log(`✅ COMPRAS: Confirmação processada - ${resultadoConfirmacao.numero} | ${resultadoConfirmacao.megas}MB`);
-                    
+
                     // Enviar mensagem de parabenização com menção clicável (igual às boas-vindas)
                     if (resultadoConfirmacao.mensagem && resultadoConfirmacao.contactId) {
                         try {
                             // Normalizar ID para formato @c.us igual às boas-vindas
                             const participantId = resultadoConfirmacao.contactId; // IGUAL ÀS BOAS-VINDAS
+
+                            // VALIDAÇÃO CRÍTICA: Verificar se é um ID válido de usuário
+                            const ehIDValido = participantId &&
+                                              typeof participantId === 'string' &&
+                                              (participantId.includes('@c.us') || participantId.includes('@lid')) &&
+                                              !participantId.startsWith('SAQUE_BONUS_') &&
+                                              !participantId.startsWith('SAQ');
+
+                            if (!ehIDValido) {
+                                console.warn(`⚠️ ID inválido para menção: ${participantId}`);
+                                // Usar fallback sem menção
+                                throw new Error('ID inválido para menção');
+                            }
+
                             // Usar exato formato das boas-vindas
                             const mensagemFinal = resultadoConfirmacao.mensagem.replace('@NOME_PLACEHOLDER', `@${participantId.replace('@c.us', '').replace('@lid', '')}`);
 
@@ -6873,9 +7291,84 @@ async function processMessage(message) {
                             await message.reply(mensagemFallback);
                         }
                     }
-                } else {
-                    console.log(`⚠️ COMPRAS: Confirmação ${referenciaConfirmada} não encontrada ou já processada`);
+                    return; // Confirmação processada com sucesso, sair
                 }
+
+                // === SE NÃO ENCONTROU NO SISTEMA DE COMPRAS, VERIFICAR NO CACHE DE DIAMANTES ===
+                console.log(`🔍 COMPRAS: Não encontrado em compras normais, verificando cache de pacotes especiais...`);
+
+                // Verificar se é divisão de pacote diamante/.8GB
+                const pacoteDiamante = Object.values(pacotesDiamantePendentes).find(
+                    p => p.divisoes && p.divisoes.includes(referenciaConfirmada)
+                );
+
+                if (pacoteDiamante) {
+                    console.log(`💎 PACOTE ESPECIAL: Confirmação de divisão detectada!`);
+                    console.log(`💎 Ref Divisão: ${referenciaConfirmada} | Pacote Original: ${pacoteDiamante.referencia}`);
+                    console.log(`💎 Tipo: ${pacoteDiamante.tipo || 'diamante'}`);
+
+                    // Adicionar à lista de confirmações recebidas (evitar duplicatas)
+                    if (!pacoteDiamante.confirmacoesRecebidas.includes(referenciaConfirmada)) {
+                        pacoteDiamante.confirmacoesRecebidas.push(referenciaConfirmada);
+                        console.log(`💎 PACOTE ESPECIAL: Confirmação adicionada (${pacoteDiamante.confirmacoesRecebidas.length}/${pacoteDiamante.divisoes.length})`);
+                    }
+
+                    // Verificar se TODAS as divisões foram confirmadas
+                    if (pacoteDiamante.confirmacoesRecebidas.length === pacoteDiamante.divisoes.length) {
+                        // Obter informações do tipo de pacote
+                        const codigoPacote = pacoteDiamante.codigoPacote || 1;
+                        const tipoPacote = pacoteDiamante.tipo || 'diamante';
+
+                        // Para pacotes .8GB, sempre usar código 2
+                        const codigoFinal = tipoPacote === 'pacote_ponto_8gb' ? 2 : codigoPacote;
+                        const infoPacote = CODIGOS_PACOTES_ESPECIAIS[codigoFinal];
+
+                        console.log(`${infoPacote.emoji} ${tipoPacote === 'pacote_ponto_8gb' ? 'PACOTE .8GB' : infoPacote.nome}: TODAS as divisões confirmadas! Enviando para planilha...`);
+
+                        // Enviar para planilha de pacotes especiais
+                        const resultado = await enviarParaGoogleSheetsDiamante(
+                            pacoteDiamante.referencia,
+                            pacoteDiamante.numero,
+                            codigoFinal,
+                            pacoteDiamante.grupoId,
+                            pacoteDiamante.grupoNome,
+                            'WhatsApp-Bot-Diamante'
+                        );
+
+                        if (resultado.sucesso) {
+                            console.log(`✅ ${tipoPacote === 'pacote_ponto_8gb' ? 'PACOTE .8GB' : infoPacote.nome}: Pacote ${pacoteDiamante.referencia} enviado com sucesso!`);
+
+                            // Enviar mensagem ao usuário
+                            try {
+                                let mensagemFinal;
+                                if (tipoPacote === 'pacote_ponto_8gb') {
+                                    mensagemFinal = `📦 *PACOTE ${pacoteDiamante.totalGB}GB ATIVADO!*\n\n✅ Todos os megas comuns foram confirmados!\n\n📱 Número: ${pacoteDiamante.numero}\n📦 Total: ${pacoteDiamante.totalGB}GB (${pacoteDiamante.gbComuns}GB comuns + ${pacoteDiamante.gb28}GB mensais)\n🔖 Referência: ${pacoteDiamante.referencia}\n\n🎉 Seu pacote completo está sendo ativado agora!`;
+                                } else {
+                                    mensagemFinal = `${infoPacote.emoji} *${infoPacote.nome.toUpperCase()} ATIVADO!*\n\n✅ Todos os megas extras foram confirmados!\n\n📱 Número: ${pacoteDiamante.numero}\n${infoPacote.emoji} Total: ${pacoteDiamante.totalGB}GB + ${infoPacote.descricao}\n🔖 Referência: ${pacoteDiamante.referencia}\n\n🎉 Seu ${infoPacote.nome.toLowerCase()} completo está sendo ativado agora!`;
+                                }
+                                await client.sendMessage(message.from, mensagemFinal);
+                            } catch (error) {
+                                console.error(`❌ Erro ao enviar mensagem de ativação:`, error);
+                            }
+
+                            // Remover do cache
+                            delete pacotesDiamantePendentes[pacoteDiamante.referencia];
+                            console.log(`${tipoPacote === 'pacote_ponto_8gb' ? '📦 PACOTE .8GB' : infoPacote.emoji + ' ' + infoPacote.nome}: Pacote removido do cache de pendentes`);
+                        } else {
+                            console.error(`❌ ${tipoPacote === 'pacote_ponto_8gb' ? 'PACOTE .8GB' : infoPacote.nome}: Erro ao enviar para planilha: ${resultado.erro}`);
+                        }
+                    } else {
+                        const codigoPacote = pacoteDiamante.codigoPacote || 1;
+                        const tipoPacote = pacoteDiamante.tipo || 'diamante';
+                        const codigoFinal = tipoPacote === 'pacote_ponto_8gb' ? 2 : codigoPacote;
+                        const infoPacote = CODIGOS_PACOTES_ESPECIAIS[codigoFinal];
+                        console.log(`⏳ ${tipoPacote === 'pacote_ponto_8gb' ? 'PACOTE .8GB' : infoPacote.nome}: Aguardando mais confirmações (${pacoteDiamante.confirmacoesRecebidas.length}/${pacoteDiamante.divisoes.length})`);
+                    }
+                    return; // Processado como pacote especial, sair
+                }
+
+                // Se não encontrou em nenhum dos dois sistemas
+                console.log(`⚠️ CONFIRMAÇÃO: ${referenciaConfirmada} não encontrada em compras nem em pacotes especiais`);
                 return;
             }
         }
@@ -6974,6 +7467,9 @@ async function processMessage(message) {
                 console.log(`📦 PROCESSANDO PACOTE .8GB NO INDEX.JS`);
 
                 const { referencia, valor, numero, pacoteDiamante } = resultadoIA;
+
+                // Verificar configGrupo antes de passar
+                console.log(`🔍 configGrupo disponível:`, configGrupo ? `✅ Sim (ID: ${configGrupo.grupoId})` : '❌ Não');
 
                 const comprovante = {
                     referencia: referencia,

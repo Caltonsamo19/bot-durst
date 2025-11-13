@@ -90,40 +90,118 @@ class SistemaPacotes {
         }
     }
     
+    // === EXTRAIR PACOTES RENOVÁVEIS DA TABELA (PARSING DINÂMICO) ===
+    extrairPacotesRenovaveis(tabelaTexto) {
+        const pacotesExtraidos = {
+            '3': [],
+            '5': [],
+            '15': []
+        };
+
+        try {
+            // Regex para encontrar seções de pacotes renováveis
+            const padroes = [
+                { tipo: '3', regex: /3\s*Dias[^\n]*(?:Renováveis)?[^\n]*\n([\s\S]*?)(?=\n\n|📅|💎|📍|$)/i },
+                { tipo: '5', regex: /5\s*Dias[^\n]*(?:Renováveis)?[^\n]*\n([\s\S]*?)(?=\n\n|📅|💎|📍|$)/i },
+                { tipo: '15', regex: /15\s*Dias[^\n]*(?:Renováveis)?[^\n]*\n([\s\S]*?)(?=\n\n|📅|💎|📍|$)/i }
+            ];
+
+            for (const { tipo, regex } of padroes) {
+                const match = tabelaTexto.match(regex);
+                if (match && match[1]) {
+                    const secao = match[1];
+
+                    // Extrair pares MB = MT
+                    // Suporta formatos: "2000MB = 44MT", "2.0GB = 44MT", "2000 MB = 44 MT"
+                    const regexPacotes = /(\d+(?:\.\d+)?)\s*(?:MB|GB)\s*=\s*(\d+(?:\.\d+)?)\s*MT/gi;
+                    let matchPacote;
+
+                    while ((matchPacote = regexPacotes.exec(secao)) !== null) {
+                        let mb = parseFloat(matchPacote[1]);
+                        const valor = parseFloat(matchPacote[2]);
+
+                        // Se for GB, converter para MB
+                        if (matchPacote[0].toUpperCase().includes('GB')) {
+                            mb = mb * 1024;
+                        }
+
+                        pacotesExtraidos[tipo].push({ mb: Math.round(mb), valor });
+                    }
+                }
+            }
+
+            console.log(`📋 PACOTES: Extraídos da tabela:`, {
+                '3 dias': pacotesExtraidos['3'].length,
+                '5 dias': pacotesExtraidos['5'].length,
+                '15 dias': pacotesExtraidos['15'].length
+            });
+
+        } catch (error) {
+            console.error(`❌ PACOTES: Erro ao extrair pacotes da tabela:`, error.message);
+        }
+
+        return pacotesExtraidos;
+    }
+
+    // === DETECTAR TIPO DE PACOTE AUTOMATICAMENTE ===
+    detectarTipoPacote(mb, valor, tabelaTexto) {
+        try {
+            const pacotesDisponiveis = this.extrairPacotesRenovaveis(tabelaTexto);
+
+            // Procurar combinação exata de MB + Valor
+            for (const [tipoDias, listaPacotes] of Object.entries(pacotesDisponiveis)) {
+                for (const pacote of listaPacotes) {
+                    // Comparar com tolerância de 1% para valores (arredondamentos)
+                    const mbMatch = Math.abs(pacote.mb - mb) <= (mb * 0.01);
+                    const valorMatch = Math.abs(pacote.valor - valor) <= (valor * 0.01);
+
+                    if (mbMatch && valorMatch) {
+                        console.log(`✅ PACOTES: Detectado pacote de ${tipoDias} dias (${mb}MB + ${valor}MT)`);
+                        return tipoDias;
+                    }
+                }
+            }
+
+            console.log(`ℹ️ PACOTES: Pacote ${mb}MB + ${valor}MT não é renovável`);
+            return null;
+
+        } catch (error) {
+            console.error(`❌ PACOTES: Erro ao detectar tipo de pacote:`, error.message);
+            return null;
+        }
+    }
+
     // === CRIAR PACOTE (SEM VERIFICAÇÃO DE PAGAMENTO) ===
-    async processarComprovante(referencia, numero, grupoId, tipoPacote) {
+    async processarComprovante(referencia, numero, grupoId, tipoPacote, horarioAtivacao = null) {
         try {
             console.log(`📦 Processando pacote: ${referencia}`);
-            
+
             // 1. Verificar se a referência já foi usada (evitar duplicatas)
             const referenciaExiste = await this.verificarReferenciaExistente(referencia);
             if (referenciaExiste) {
                 console.log(`❌ PACOTES: Referência ${referencia} já foi utilizada`);
                 return { sucesso: false, erro: 'Esta referência já foi utilizada para criar um pacote' };
             }
-            
+
             // 2. Verificar se é um tipo de pacote válido
             if (!this.TIPOS_PACOTES[tipoPacote]) {
                 console.log(`❌ PACOTES: Tipo de pacote inválido: ${tipoPacote}`);
                 return { sucesso: false, erro: 'Tipo de pacote inválido' };
             }
-            
+
             // 3. Calcular datas
             const agora = new Date();
+            const horaAtivacao = horarioAtivacao ? new Date(horarioAtivacao) : agora;
             const diasPacote = this.TIPOS_PACOTES[tipoPacote].dias;
-            const dataExpiracao = new Date(agora.getTime() + (diasPacote * 24 * 60 * 60 * 1000));
-            
-            // 4. Criar primeiro PEDIDO e PAGAMENTO usando referência + D1
-            const primeiraRef = `${referencia}D1`;
-            const valor100MB = this.calcularValor100MB(grupoId);
-            
-            // Criar PEDIDO na planilha de pedidos
-            await this.criarPedidoPacote(primeiraRef, 100, numero, grupoId, agora);
-            
-            // Criar PAGAMENTO na planilha de pagamentos (mesma referência)
-            await this.criarPagamentoPacote(primeiraRef, valor100MB, numero, grupoId, agora);
-            
-            // 5. Registrar cliente no sistema
+            const dataExpiracao = new Date(horaAtivacao.getTime() + (diasPacote * 24 * 60 * 60 * 1000));
+
+            // 4. NOVA LÓGICA: NÃO criar D1 imediatamente, apenas agendar
+            // Calcular primeira renovação: DIA SEGUINTE, 2h ANTES da hora de ativação
+            const primeiraRenovacao = new Date(horaAtivacao);
+            primeiraRenovacao.setDate(primeiraRenovacao.getDate() + 1); // +1 dia
+            primeiraRenovacao.setHours(primeiraRenovacao.getHours() - 2); // -2 horas
+
+            // 5. Registrar cliente no sistema (SEM criar D1 agora)
             const clienteId = `${numero}_${referencia}`;
             this.clientesAtivos[clienteId] = {
                 numero: numero,
@@ -131,21 +209,22 @@ class SistemaPacotes {
                 grupoId: grupoId,
                 tipoPacote: tipoPacote,
                 diasTotal: diasPacote,
-                diasRestantes: diasPacote - 1,
+                diasRestantes: diasPacote, // AGORA é diasPacote (não -1)
                 dataInicio: agora.toISOString(),
                 dataExpiracao: dataExpiracao.toISOString(),
-                horaEnvioOriginal: agora.toISOString(),
-                proximaRenovacao: this.calcularProximaRenovacao(agora),
+                horaEnvioOriginal: horaAtivacao.toISOString(),
+                proximaRenovacao: primeiraRenovacao.toISOString(),
                 renovacoes: 0,
                 status: 'ativo',
-                ultimaRenovacao: agora.toISOString()
+                ultimaRenovacao: null // Ainda não teve renovação
             };
-            
+
             // 6. Salvar dados
             await this.salvarDados();
-            
+
             console.log(`✅ Cliente ativado com ${this.TIPOS_PACOTES[tipoPacote].nome}`);
-            
+            console.log(`📅 Primeira renovação agendada para: ${primeiraRenovacao.toLocaleString('pt-BR')}`);
+
             return {
                 sucesso: true,
                 cliente: this.clientesAtivos[clienteId],
@@ -153,12 +232,13 @@ class SistemaPacotes {
                          `📱 **Número:** ${numero}\n` +
                          `📋 **Referência:** ${referencia}\n` +
                          `📅 **Duração:** ${diasPacote} dias\n` +
-                         `⚡ **Primeira transferência:** ${primeiraRef} (100MB criada)\n` +
-                         `🔄 **Renovações automáticas:** ${diasPacote - 1}x (100MB cada, 2h antes do horário anterior)\n` +
+                         `⚡ **Pacote principal já foi ativado**\n` +
+                         `🔄 **Renovações automáticas:** ${diasPacote}x (100MB cada)\n` +
+                         `📅 **Primeira renovação:** ${primeiraRenovacao.toLocaleDateString('pt-BR')} às ${primeiraRenovacao.toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'})} (2h antes)\n` +
                          `📅 **Expira em:** ${dataExpiracao.toLocaleDateString('pt-BR')}\n\n` +
                          `💡 *O cliente pode verificar a validade com: .validade ${numero}*`
             };
-            
+
         } catch (error) {
             console.error(`❌ PACOTES: Erro ao processar comprovante:`, error);
             return { sucesso: false, erro: error.message };

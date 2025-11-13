@@ -380,62 +380,28 @@ class SistemaRelatorios {
      * @param {number} precoRevenda - Preço de revenda do grupo (MT/GB)
      */
     gerarTextoRelatorio(dados, grupoNome, periodo, precoRevenda = 16) {
-        let texto = `📊 *RELATÓRIO 24H* - ${grupoNome}\n`;
-        texto += `📅 Período: ${periodo.inicioFormatado} - ${periodo.fimFormatado}\n`;
-        texto += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+        let texto = `*📊RELATÓRIO 24H - ${grupoNome}*\n`;
+        texto += `📅Período: ${periodo.inicioFormatado} - ${periodo.fimFormatado}\n\n`;
 
         // Seção Vendas
-        texto += `📦 *VENDAS (Últimas 24h):*\n`;
-        if (dados.totalPedidos === 0) {
-            texto += `❌ Nenhum pedido registrado\n\n`;
-        } else {
-            texto += `✅ Pedidos realizados: ${dados.totalPedidos}\n`;
-            texto += `🌐 Total gigas vendidos: ${dados.totalGigas} GB\n\n`;
-        }
-
-        // Seção Pagamentos
-        texto += `💰 *PAGAMENTOS (Últimas 24h):*\n`;
-        if (dados.pagamentosConfirmados === 0) {
-            texto += `❌ Nenhum pagamento confirmado\n`;
-        } else {
-            texto += `✅ Pagamentos confirmados: ${dados.pagamentosConfirmados}\n`;
-            texto += `💵 Total recebido: ${dados.totalArrecadado.toLocaleString('pt-BR')} MT\n`;
-        }
-
-        if (dados.pedidosPendentes > 0) {
-            texto += `⏳ Pendentes: ${dados.pedidosPendentes} pedidos (≈${dados.valorPendente.toLocaleString('pt-BR')} MT)\n`;
-        }
-        texto += `\n`;
+        texto += `*📦VENDAS*\n`;
+        texto += `✅Pedidos realizados: ${dados.totalPedidos}\n`;
+        texto += `🌐Total gigas vendidos: ${dados.totalGigas} GB\n`;
+        texto += `💵 Total recebido: ${dados.totalArrecadado.toLocaleString('pt-BR')} MT\n\n`;
 
         // Seção Lucro (só se houver vendas)
         if (dados.totalGigas > 0) {
             const lucroPorGiga = precoRevenda - this.PRECO_COMPRA;
             const receitaTotalVendas = Math.round(dados.totalGigas * precoRevenda);
 
-            texto += `💰 *LUCRO (Últimas 24h):*\n`;
-            texto += `📥 Custo total: ${dados.custoTotal.toLocaleString('pt-BR')} MT (${this.PRECO_COMPRA} MT/GB)\n`;
-            texto += `📤 Receita total: ${receitaTotalVendas.toLocaleString('pt-BR')} MT (${precoRevenda} MT/GB)\n`;
-            texto += `💚 Lucro líquido: ${dados.lucroTotal.toLocaleString('pt-BR')} MT (${lucroPorGiga} MT/GB)\n\n`;
+            texto += `*💰LUCROS*\n`;
+            texto += `📥Custo total: ${dados.custoTotal.toLocaleString('pt-BR')} MT (${this.PRECO_COMPRA} MT/GB)\n`;
+            texto += `📤Receita total: ${receitaTotalVendas.toLocaleString('pt-BR')} MT (${precoRevenda} MT/GB)\n`;
+            texto += `💚Lucro líquido: ${dados.lucroTotal.toLocaleString('pt-BR')} MT (${lucroPorGiga} MT/GB)\n\n`;
         }
 
-        // Seção Performance (só se houver dados)
-        if (dados.totalPedidos > 0) {
-            const taxaConversao = Math.round((dados.pagamentosConfirmados / dados.totalPedidos) * 100);
-            const ticketMedio = dados.pagamentosConfirmados > 0 ? Math.round(dados.totalArrecadado / dados.pagamentosConfirmados) : 0;
-            const gigasPorVenda = dados.totalPedidos > 0 ? (dados.totalGigas / dados.totalPedidos).toFixed(2) : 0;
-
-            texto += `📊 *PERFORMANCE:*\n`;
-            texto += `📈 Taxa conversão: ${taxaConversao}% (${dados.pagamentosConfirmados}/${dados.totalPedidos})\n`;
-
-            if (ticketMedio > 0) {
-                texto += `💸 Ticket médio: ${ticketMedio.toLocaleString('pt-BR')} MT\n`;
-            }
-
-            texto += `🌐 Gigas por venda: ${gigasPorVenda} GB\n\n`;
-        }
-
-        texto += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        texto += `🤖 Relatório automático - ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+        texto += `\n*🤖Relatório automático*\n`;
+        texto += `_Powered by NeuroByte✅_`;
 
         return texto;
     }
