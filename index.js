@@ -94,7 +94,7 @@ setInterval(verificarSinalRestart, 10000);
 
 // === AXIOS SIMPLIFICADO (SEGUINDO PADRÃO BOT1) ===
 const axiosInstance = axios.create({
-    timeout: 15000, // 15 segundos - OTIMIZADO para respostas rápidas
+    timeout: 60000, // 60 segundos - tolerância a conexões lentas
     maxRedirects: 3,
     headers: {
         'User-Agent': 'WhatsApp-Bot/1.0'
@@ -523,8 +523,8 @@ const MAX_RETRY_ATTEMPTS = 10; // 10 tentativas em 5 minutos (1 a cada 30s)
 
 // === CONTROLE DE RATE LIMITING ===
 let ultimaRequisicao = 0;
-const DELAY_ENTRE_REQUISICOES = 500; // 500ms entre cada requisição (OTIMIZADO para velocidade)
-const MAX_REQUISICOES_POR_MINUTO = 40; // 40 req/min (OTIMIZADO para envios rápidos)
+const DELAY_ENTRE_REQUISICOES = 2000; // 2 segundos entre cada verificação (reduzido)
+const MAX_REQUISICOES_POR_MINUTO = 20; // Aumentado para 20 req/min
 let requisicoesUltimoMinuto = [];
 let erros429Consecutivos = 0;
 const MAX_ERROS_429 = 3; // Após 3 erros 429, pausar temporariamente
@@ -2856,6 +2856,7 @@ Sempre conectado, sempre no controle!
 `
     }
 };
+
 
 
 
