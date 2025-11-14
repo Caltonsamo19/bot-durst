@@ -2135,8 +2135,8 @@ async function verificarPagamentosPendentes() {
             const tempoDecorrido = Math.floor((agora - pendencia.timestamp) / 1000 / 60);
             console.log(`⏰ RETRY: Pagamento ${pendencia.referencia} expirou após ${tempoDecorrido}min sem confirmação`);
 
-            // NOTIFICAR USUÁRIO SOBRE FALHA
-            await notificarPagamentoExpirado(pendencia);
+            // NOTIFICAR USUÁRIO SOBRE FALHA - DESABILITADO
+            // await notificarPagamentoExpirado(pendencia);
             await removerPagamentoPendente(pendencia.id);
             continue;
         }
@@ -2145,8 +2145,8 @@ async function verificarPagamentosPendentes() {
         if (pendencia.tentativas >= MAX_RETRY_ATTEMPTS) {
             console.log(`❌ RETRY: Pagamento ${pendencia.referencia} atingiu limite de ${MAX_RETRY_ATTEMPTS} tentativas`);
 
-            // NOTIFICAR USUÁRIO SOBRE FALHA
-            await notificarPagamentoExpirado(pendencia);
+            // NOTIFICAR USUÁRIO SOBRE FALHA - DESABILITADO
+            // await notificarPagamentoExpirado(pendencia);
             await removerPagamentoPendente(pendencia.id);
             continue;
         }
@@ -2649,6 +2649,214 @@ Sempre conectado, sempre no controle!
 
 NB: Válido apenas para Vodacom  
 🚀 Garanta seus Megabytes agora!
+`
+    },
+'120363419414311700@g.us': {
+        nome: '🪐Megabytes PROMO',
+        tabela: `📢🔥 TABELA ATUALIZADA – OUTUBRO 2025 🔥📢
+Internet e Chamadas Ilimitadas – Vodacom
+Pacotes Diários | Semanais | Mensais
+
+OFERTA ESPECIAL – 24 HORAS ⏱
+600MB - 10MT
+800MB - 15MT
+1024MB - 17MT
+1200MB - 20MT
+2048MB - 34MT
+
+PACOTES DIÁRIOS (24H ⏱)
+2400MB - 40MT
+3072MB - 51MT
+4096MB - 68MT
+5120MB - 85MT
+6144MB - 102MT
+7168MB - 119MT
+8192MB - 136MT
+9144MB - 153MT
+10240MB - 170MT
+
+PACOTES PREMIUM (3 DIAS 🗓 – RENOVÁVEIS)
+2000MB - 44MT
+3000MB - 66MT
+4000MB - 88MT
+5000MB - 109MT
+6000MB - 133MT
+7000MB - 149MT
+10000MB - 219MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 3 dias
+
+SEMANAIS BÁSICOS (5 DIAS 🗓 – RENOVÁVEIS)
+1700MB - 45MT
+2900MB - 80MT
+3400MB - 110MT
+5500MB - 150MT
+7800MB - 200MT
+11400MB - 300MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 5 dias
+
+SEMANAIS PREMIUM (15 DIAS 🗓 – RENOVÁVEIS)
+3000MB - 100MT
+5000MB - 149MT
+8000MB - 201MT
+10000MB - 231MT
+20000MB - 352MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 15 dias
+
+PACOTES MENSAIS EXCLUSIVOS (30 DIAS 📆 – NÃO RENOVÁVEIS)
+2.8GB - 100MT
+5.8GB - 175MT
+8.8GB - 200MT
+10.8GB - 249MT
+12.8GB - 300MT
+15.8GB - 349MT
+18.8GB - 400MT
+20.8GB - 449MT
+25.8GB - 549MT
+32.8GB - 649MT
+51.2GB - 1049MT
+60.2GB - 1249MT
+80.2GB - 1449MT
+100.2GB - 1700MT
+Observação: Pacotes mensais não compatíveis com Txuna
+
+CHAMADAS ILIMITADAS — VODACOM 📞 ♾
+
+11GB - 449MT - Ilimitadas ✨
+14.5GB - 500MT - Ilimitadas
+26.5GB - 700MT - Ilimitadas
+37.5GB - 1000MT - Ilimitadas
+53.5GB - 1500MT - Ilimitadas
+102.5GB - 2150MT - Ilimitadas
+Inclui chamadas e SMS ilimitadas para todas as redes
+
+CHAMADAS ILIMITADAS — MOVITEL 📞 ♾
+
+9GB - 469MT - Ilimitadas ✨
+23GB - 950MT - Ilimitadas
+38GB - 1450MT - Ilimitadas
+46GB - 1700MT - Ilimitadas
+53GB - 1900MT - Ilimitadas
+68GB - 2400MT - Ilimitadas
+Inclui chamadas e SMS ilimitadas para todas as redes
+
+🔹 CONEXÃO SEM LIMITES 🔹
+Internet rápida, chamadas e SMS ilimitadas.
+Pacotes exclusivos Vodacom e Movitel.
+Sempre conectado, sempre no controle!
+`,
+
+        pagamento: `💸 FORMAS DE PAGAMENTO
+
+🟠 E-Mola – Glória | 📲 860186270  
+🔴 M-Pesa – Leonor | 📲 857451196  
+
+⚠ ATENÇÃO  
+▪ Após o pagamento, envie a confirmação ✉ ** e o seu número para receber o seu pacote 📲  
+▪ Envie ** o valor exato da tabela 💰  
+
+NB: Válido apenas para Vodacom  
+🚀 Garanta seus Megabytes agora!
+`
+    },
+'120363420106859235@g.us': {
+        nome: 'MozStreaming MB’s v3*',
+        tabela: `📢🔥 TABELA ATUALIZADA – OUTUBRO 2025 🔥📢
+Internet e Chamadas Ilimitadas – Vodacom
+Pacotes Diários | Semanais | Mensais
+
+OFERTA ESPECIAL – 24 HORAS ⏱
+600MB - 10MT
+800MB - 15MT
+1024MB - 17MT
+1200MB - 20MT
+2048MB - 34MT
+
+PACOTES DIÁRIOS (24H ⏱)
+2400MB - 40MT
+3072MB - 51MT
+4096MB - 68MT
+5120MB - 85MT
+6144MB - 102MT
+7168MB - 119MT
+8192MB - 136MT
+9144MB - 153MT
+10240MB - 170MT
+
+PACOTES PREMIUM (3 DIAS 🗓 – RENOVÁVEIS)
+2000MB - 44MT
+3000MB - 66MT
+4000MB - 88MT
+5000MB - 109MT
+6000MB - 133MT
+7000MB - 149MT
+10000MB - 219MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 3 dias
+
+SEMANAIS BÁSICOS (5 DIAS 🗓 – RENOVÁVEIS)
+1700MB - 45MT
+2900MB - 80MT
+3400MB - 110MT
+5500MB - 150MT
+7800MB - 200MT
+11400MB - 300MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 5 dias
+
+SEMANAIS PREMIUM (15 DIAS 🗓 – RENOVÁVEIS)
+3000MB - 100MT
+5000MB - 149MT
+8000MB - 201MT
+10000MB - 231MT
+20000MB - 352MT
+Bônus 🔄: Receba 100MB extras para atualizar os megas dentro de 15 dias
+
+PACOTES MENSAIS EXCLUSIVOS (30 DIAS 📆 – NÃO RENOVÁVEIS)
+2.8GB - 100MT
+5.8GB - 175MT
+8.8GB - 200MT
+10.8GB - 249MT
+12.8GB - 300MT
+15.8GB - 349MT
+18.8GB - 400MT
+20.8GB - 449MT
+25.8GB - 549MT
+32.8GB - 649MT
+51.2GB - 1049MT
+60.2GB - 1249MT
+80.2GB - 1449MT
+100.2GB - 1700MT
+Observação: Pacotes mensais não compatíveis com Txuna
+
+CHAMADAS ILIMITADAS — VODACOM 📞 ♾
+
+11GB - 449MT - Ilimitadas ✨
+14.5GB - 500MT - Ilimitadas
+26.5GB - 700MT - Ilimitadas
+37.5GB - 1000MT - Ilimitadas
+53.5GB - 1500MT - Ilimitadas
+102.5GB - 2150MT - Ilimitadas
+Inclui chamadas e SMS ilimitadas para todas as redes
+
+CHAMADAS ILIMITADAS — MOVITEL 📞 ♾
+
+9GB - 469MT - Ilimitadas ✨
+23GB - 950MT - Ilimitadas
+38GB - 1450MT - Ilimitadas
+46GB - 1700MT - Ilimitadas
+53GB - 1900MT - Ilimitadas
+68GB - 2400MT - Ilimitadas
+Inclui chamadas e SMS ilimitadas para todas as redes
+
+🔹 CONEXÃO SEM LIMITES 🔹
+Internet rápida, chamadas e SMS ilimitadas.
+Pacotes exclusivos Vodacom e Movitel.
+Sempre conectado, sempre no controle!
+`,
+
+        pagamento: `FORMAS DE PAGAMENTO
+📱 M-Pesa: 844345161 (Elton Matusse)
+📱 E-Mola: 864524363 (Aleocha Matusse)
+
+📩 Envie o comprovativo, após o pagamento e o número que receberá os dados!
 `
     }
 };
@@ -3406,13 +3614,14 @@ async function salvarComandosCustomizados() {
 }
 
 function parsearComandoCustomizado(texto) {
-    // Regex para capturar: .addcomando Nome_do_comando(resposta)
-    const regex = /^\.addcomando\s+(\w+)\s*\((.+)\)$/s;
+    // Regex para capturar: .addcomando Nome do comando(resposta)
+    // Aceita múltiplas palavras e caracteres especiais (ç, á, õ, etc)
+    const regex = /^\.addcomando\s+(.+?)\s*\((.+)\)$/s;
     const match = texto.match(regex);
-    
+
     if (match) {
         return {
-            nome: match[1].toLowerCase(),
+            nome: match[1].trim().toLowerCase(),
             resposta: match[2].trim()
         };
     }
@@ -5319,7 +5528,7 @@ async function processMessage(message) {
                 const comandoParsado = parsearComandoCustomizado(message.body);
                 
                 if (!comandoParsado) {
-                    await message.reply(`❌ *Sintaxe incorreta!*\n\n✅ *Sintaxe correta:*\n\`.addcomando NomeComando(Sua resposta aqui)\`\n\n📝 *Exemplo:*\n\`.addcomando horario(Funcionamos de 8h às 18h)\`\n\n⚠️ *Importante:*\n• Nome sem espaços\n• Resposta entre parênteses\n• Pode usar quebras de linha`);
+                    await message.reply(`❌ *Sintaxe incorreta!*\n\n✅ *Sintaxe correta:*\n\`.addcomando Nome do Comando(Sua resposta aqui)\`\n\n📝 *Exemplos:*\n\`.addcomando horário(Funcionamos de 8h às 18h)\`\n\`.addcomando promoção mb(Promoção especial hoje!)\`\n\`.addcomando como comprar(Envie o valor que deseja)\`\n\n⚠️ *Importante:*\n• Aceita múltiplas palavras\n• Aceita caracteres especiais (ç, á, õ, etc)\n• Resposta entre parênteses\n• Pode usar quebras de linha`);
                     return;
                 }
                 
@@ -5346,7 +5555,7 @@ async function processMessage(message) {
                 const comandosGrupo = comandosCustomizados[grupoId];
                 
                 if (!comandosGrupo || Object.keys(comandosGrupo).length === 0) {
-                    await message.reply('📋 *Nenhum comando customizado criado ainda*\n\n💡 **Para criar:** `.addcomando nome(resposta)`');
+                    await message.reply('📋 *Nenhum comando customizado criado ainda*\n\n💡 **Para criar:** `.addcomando nome do comando(resposta)`');
                     return;
                 }
                 
