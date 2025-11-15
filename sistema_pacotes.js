@@ -25,7 +25,13 @@ class SistemaPacotes {
         // Arquivo para persistir dados dos clientes ativos
         this.ARQUIVO_CLIENTES = path.join(__dirname, 'dados_pacotes_clientes.json');
         this.ARQUIVO_HISTORICO = path.join(__dirname, 'historico_renovacoes.json');
-        
+
+        // Arquivos de backup
+        this.PASTA_BACKUP = path.join(__dirname, 'backup_pacotes');
+        this.ARQUIVO_BACKUP_CLIENTES = path.join(this.PASTA_BACKUP, 'dados_pacotes_clientes_backup.json');
+        this.ARQUIVO_BACKUP_HISTORICO = path.join(this.PASTA_BACKUP, 'historico_renovacoes_backup.json');
+        this.ARQUIVO_BACKUP_ROTATIVO = path.join(this.PASTA_BACKUP, 'dados_pacotes_backup_');
+
         // Controle de clientes ativos
         this.clientesAtivos = {};
         this.historicoRenovacoes = [];
@@ -38,7 +44,10 @@ class SistemaPacotes {
         console.log(`   📋 Pedidos (Retalho): ${this.PLANILHAS.PEDIDOS}`);
         console.log(`   💰 Pagamentos (Universal): ${this.PLANILHAS.PAGAMENTOS}`);
         console.log(`   ⏱️ Verificação: ${this.intervalVerificacao/60000} min`);
-        
+
+        // Garantir que a pasta de backup existe
+        this.garantirPastaBackup();
+
         // Carregar dados persistidos
         this.carregarDados();
         
@@ -49,14 +58,32 @@ class SistemaPacotes {
     // === CARREGAR DADOS PERSISTIDOS ===
     async carregarDados() {
         try {
-            // Carregar clientes ativos
+            // Carregar clientes ativos com backup automático
             try {
                 const dadosClientes = await fs.readFile(this.ARQUIVO_CLIENTES, 'utf8');
-                this.clientesAtivos = JSON.parse(dadosClientes);
-                console.log(`📦 ${Object.keys(this.clientesAtivos).length} clientes ativos carregados`);
+                const dadosParsados = JSON.parse(dadosClientes);
+
+                // Validar se os dados carregados são válidos
+                if (dadosParsados && typeof dadosParsados === 'object') {
+                    this.clientesAtivos = dadosParsados;
+                    console.log(`📦 ${Object.keys(this.clientesAtivos).length} clientes ativos carregados`);
+
+                    // Criar backup automático após carregamento bem-sucedido
+                    await this.criarBackupPacotes();
+                } else {
+                    throw new Error('Dados inválidos no arquivo de clientes');
+                }
             } catch (error) {
-                console.log(`📦 Nenhum arquivo de clientes encontrado - iniciando limpo`);
-                this.clientesAtivos = {};
+                console.log(`⚠️ Erro ao carregar clientes: ${error.message}`);
+
+                // Tentar restaurar do backup
+                const backupRestaurado = await this.restaurarBackupPacotes();
+                if (backupRestaurado) {
+                    console.log('✅ Clientes restaurados do backup!');
+                } else {
+                    console.log(`📦 Nenhum arquivo de clientes encontrado - iniciando limpo`);
+                    this.clientesAtivos = {};
+                }
             }
             
             // Carregar histórico
@@ -74,17 +101,25 @@ class SistemaPacotes {
         }
     }
     
-    // === SALVAR DADOS ===
+    // === SALVAR DADOS COM BACKUP AUTOMÁTICO ===
     async salvarDados() {
         try {
+            const qtdClientes = Object.keys(this.clientesAtivos).length;
+            console.log(`💾 PACOTES: Salvando dados (${qtdClientes} clientes)...`);
+
+            // Criar backup antes de salvar (apenas se houver dados)
+            if (qtdClientes > 0) {
+                await this.criarBackupPacotes();
+            }
+
             // Salvar clientes ativos
             await fs.writeFile(this.ARQUIVO_CLIENTES, JSON.stringify(this.clientesAtivos, null, 2));
-            
+
             // Salvar histórico (manter apenas últimos 1000 registros)
             const historicoLimitado = this.historicoRenovacoes.slice(-1000);
             await fs.writeFile(this.ARQUIVO_HISTORICO, JSON.stringify(historicoLimitado, null, 2));
-            
-            console.log(`💾 PACOTES: Dados salvos - ${Object.keys(this.clientesAtivos).length} clientes ativos`);
+
+            console.log(`✅ PACOTES: Dados salvos - ${qtdClientes} clientes ativos`);
         } catch (error) {
             console.error(`❌ PACOTES: Erro ao salvar dados:`, error);
         }
@@ -720,6 +755,150 @@ class SistemaPacotes {
             tiposPacotes: Object.keys(this.TIPOS_PACOTES),
             historicoSize: this.historicoRenovacoes.length
         };
+    }
+
+    // === SISTEMA DE BACKUP AUTOMÁTICO ===
+
+    // Garantir que pasta de backup existe
+    async garantirPastaBackup() {
+        try {
+            await fs.mkdir(this.PASTA_BACKUP, { recursive: true });
+            console.log('📁 Pasta de backup de pacotes verificada');
+        } catch (error) {
+            console.log('⚠️ Erro ao criar pasta de backup:', error.message);
+        }
+    }
+
+    // Criar backup dos dados de pacotes
+    async criarBackupPacotes() {
+        try {
+            if (Object.keys(this.clientesAtivos).length === 0) {
+                return; // Não criar backup de dados vazios
+            }
+
+            await this.garantirPastaBackup();
+
+            const agora = new Date();
+            const timestamp = agora.toISOString().replace(/[:.]/g, '-');
+            const dadosBackup = {
+                timestamp: agora.toISOString(),
+                versao: '1.0',
+                totalClientes: Object.keys(this.clientesAtivos).length,
+                totalHistorico: this.historicoRenovacoes.length,
+                clientes: this.clientesAtivos,
+                historico: this.historicoRenovacoes.slice(-1000) // Últimos 1000 registros
+            };
+
+            // Backup principal (sempre sobrescreve)
+            await fs.writeFile(this.ARQUIVO_BACKUP_CLIENTES, JSON.stringify(dadosBackup, null, 2));
+
+            // Backup rotativo (manter últimos 7 dias)
+            const arquivoRotativo = `${this.ARQUIVO_BACKUP_ROTATIVO}${timestamp}.json`;
+            await fs.writeFile(arquivoRotativo, JSON.stringify(dadosBackup, null, 2));
+
+            // Limpar backups antigos
+            await this.limparBackupsAntigosPacotes();
+
+            console.log(`💾 Backup de pacotes criado: ${Object.keys(this.clientesAtivos).length} clientes ativos`);
+
+        } catch (error) {
+            console.error('❌ Erro ao criar backup de pacotes:', error.message);
+        }
+    }
+
+    // Restaurar backup de pacotes
+    async restaurarBackupPacotes() {
+        try {
+            console.log('🔄 Tentando restaurar backup de pacotes...');
+
+            // Tentar restaurar backup principal primeiro
+            try {
+                const dadosBackup = await fs.readFile(this.ARQUIVO_BACKUP_CLIENTES, 'utf8');
+                const backup = JSON.parse(dadosBackup);
+
+                if (backup.clientes && typeof backup.clientes === 'object') {
+                    this.clientesAtivos = backup.clientes;
+                    if (backup.historico && Array.isArray(backup.historico)) {
+                        this.historicoRenovacoes = backup.historico;
+                    }
+                    console.log(`✅ Backup principal de pacotes restaurado: ${Object.keys(this.clientesAtivos).length} clientes`);
+                    await this.salvarDados();
+                    return true;
+                }
+            } catch (error) {
+                console.log('⚠️ Backup principal de pacotes não disponível, tentando backups rotativos...');
+            }
+
+            // Tentar restaurar do backup rotativo mais recente
+            try {
+                const arquivos = await fs.readdir(this.PASTA_BACKUP);
+                const backupsRotativos = arquivos
+                    .filter(arquivo => arquivo.startsWith('dados_pacotes_backup_') && arquivo.endsWith('.json'))
+                    .sort()
+                    .reverse(); // Mais recente primeiro
+
+                for (const arquivo of backupsRotativos) {
+                    try {
+                        const caminhoBackup = path.join(this.PASTA_BACKUP, arquivo);
+                        const dadosBackup = await fs.readFile(caminhoBackup, 'utf8');
+                        const backup = JSON.parse(dadosBackup);
+
+                        if (backup.clientes && typeof backup.clientes === 'object') {
+                            this.clientesAtivos = backup.clientes;
+                            if (backup.historico && Array.isArray(backup.historico)) {
+                                this.historicoRenovacoes = backup.historico;
+                            }
+                            console.log(`✅ Backup rotativo de pacotes restaurado (${arquivo}): ${Object.keys(this.clientesAtivos).length} clientes`);
+                            await this.salvarDados();
+                            return true;
+                        }
+                    } catch (error) {
+                        console.log(`⚠️ Backup ${arquivo} corrompido, tentando próximo...`);
+                        continue;
+                    }
+                }
+            } catch (error) {
+                console.log('⚠️ Erro ao acessar backups rotativos de pacotes:', error.message);
+            }
+
+            console.log('❌ Nenhum backup válido de pacotes encontrado');
+            return false;
+
+        } catch (error) {
+            console.error('❌ Erro ao restaurar backup de pacotes:', error.message);
+            return false;
+        }
+    }
+
+    // Limpar backups antigos de pacotes
+    async limparBackupsAntigosPacotes() {
+        try {
+            const arquivos = await fs.readdir(this.PASTA_BACKUP);
+            const agora = new Date();
+            const limiteDias = 7 * 24 * 60 * 60 * 1000; // 7 dias
+
+            const backupsRotativos = arquivos.filter(arquivo =>
+                arquivo.startsWith('dados_pacotes_backup_') && arquivo.endsWith('.json')
+            );
+
+            for (const arquivo of backupsRotativos) {
+                try {
+                    const caminhoArquivo = path.join(this.PASTA_BACKUP, arquivo);
+                    const stats = await fs.stat(caminhoArquivo);
+                    const idadeArquivo = agora - stats.mtime;
+
+                    if (idadeArquivo > limiteDias) {
+                        await fs.unlink(caminhoArquivo);
+                        console.log(`🗑️ Backup antigo de pacotes removido: ${arquivo}`);
+                    }
+                } catch (error) {
+                    console.log(`⚠️ Erro ao processar backup de pacotes ${arquivo}:`, error.message);
+                }
+            }
+
+        } catch (error) {
+            console.log('⚠️ Erro ao limpar backups antigos de pacotes:', error.message);
+        }
     }
 }
 

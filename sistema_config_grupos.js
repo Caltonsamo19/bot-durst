@@ -15,40 +15,60 @@ class SistemaConfigGrupos {
         // Configurações em memória
         this.configGrupos = {};
 
-        // Carregar configurações
-        this.carregarConfiguracoes();
-
-        console.log('⚙️ Sistema de Configuração inicializado!');
+        // Não carregar no construtor - será carregado explicitamente após criação
+        console.log('⚙️ Sistema de Configuração inicializado! (aguardando carregamento)');
     }
 
     // === CARREGAR CONFIGURAÇÕES ===
     async carregarConfiguracoes() {
         try {
+            console.log(`📂 Tentando carregar: ${this.ARQUIVO_CONFIG}`);
             const dados = await fs.readFile(this.ARQUIVO_CONFIG, 'utf8');
             this.configGrupos = JSON.parse(dados);
-            console.log(`✅ Configurações carregadas: ${Object.keys(this.configGrupos).length} grupos`);
+            console.log(`✅ Configurações carregadas com SUCESSO: ${Object.keys(this.configGrupos).length} grupos`);
+            console.log(`📋 Grupos carregados: ${Object.keys(this.configGrupos).join(', ')}`);
+            return true;
         } catch (error) {
-            console.log('⚙️ Arquivo de configuração não existe, será criado ao salvar');
+            if (error.code === 'ENOENT') {
+                console.log('⚠️ Arquivo de configuração não existe, será criado ao salvar');
+            } else {
+                console.error('❌ Erro ao carregar configurações:', error.message);
+            }
             this.configGrupos = {};
+            return false;
         }
     }
 
     // === SALVAR CONFIGURAÇÕES ===
     async salvarConfiguracoes() {
         try {
+            console.log(`💾 Salvando configurações em: ${this.ARQUIVO_CONFIG}`);
+            console.log(`📊 Dados a salvar: ${Object.keys(this.configGrupos).length} grupos`);
+
             // Criar backup antes de salvar
             await this.criarBackup();
 
-            // Salvar nova configuração
-            await fs.writeFile(
-                this.ARQUIVO_CONFIG,
-                JSON.stringify(this.configGrupos, null, 2)
-            );
+            // Converter para JSON
+            const jsonData = JSON.stringify(this.configGrupos, null, 2);
 
-            console.log(`💾 Configurações salvas: ${Object.keys(this.configGrupos).length} grupos`);
-            return true;
+            // Salvar nova configuração
+            await fs.writeFile(this.ARQUIVO_CONFIG, jsonData, 'utf8');
+
+            // Verificar se salvou corretamente
+            const verificacao = await fs.readFile(this.ARQUIVO_CONFIG, 'utf8');
+            const dadosVerificados = JSON.parse(verificacao);
+
+            if (Object.keys(dadosVerificados).length === Object.keys(this.configGrupos).length) {
+                console.log(`✅ Configurações SALVAS e VERIFICADAS: ${Object.keys(this.configGrupos).length} grupos`);
+                console.log(`📋 Grupos salvos: ${Object.keys(this.configGrupos).join(', ')}`);
+                return true;
+            } else {
+                console.error('❌ ERRO: Verificação falhou - dados salvos não correspondem!');
+                return false;
+            }
         } catch (error) {
             console.error('❌ Erro ao salvar configurações:', error);
+            console.error('Stack:', error.stack);
             return false;
         }
     }
@@ -60,7 +80,7 @@ class SistemaConfigGrupos {
             try {
                 await fs.access(this.ARQUIVO_CONFIG);
                 const dados = await fs.readFile(this.ARQUIVO_CONFIG, 'utf8');
-                await fs.writeFile(this.ARQUIVO_BACKUP, dados);
+                await fs.writeFile(this.ARQUIVO_BACKUP, dados, 'utf8');
                 console.log('💾 Backup criado com sucesso');
             } catch {
                 console.log('ℹ️ Nenhum arquivo para backup (primeira configuração)');
@@ -68,6 +88,15 @@ class SistemaConfigGrupos {
         } catch (error) {
             console.error('⚠️ Erro ao criar backup:', error.message);
         }
+    }
+
+    // === VERIFICAR SE DADOS ESTÃO CARREGADOS ===
+    verificarCarregado() {
+        const carregado = this.configGrupos && Object.keys(this.configGrupos).length >= 0;
+        if (!carregado) {
+            console.warn('⚠️ AVISO: ConfigGrupos pode não estar carregado corretamente!');
+        }
+        return carregado;
     }
 
     // === ATUALIZAR TABELA DE UM GRUPO ===
@@ -199,7 +228,14 @@ class SistemaConfigGrupos {
 
     // === OBTER CONFIGURAÇÃO DE UM GRUPO ===
     obterConfig(grupoId) {
-        return this.configGrupos[grupoId] || null;
+        this.verificarCarregado();
+        const config = this.configGrupos[grupoId] || null;
+        if (config) {
+            console.log(`📖 Config obtida para grupo ${grupoId}: ${config.nome}`);
+        } else {
+            console.log(`⚠️ Nenhuma config encontrada para grupo ${grupoId}`);
+        }
+        return config;
     }
 
     // === CONTAR PREÇOS NA TABELA ===
@@ -291,6 +327,47 @@ class SistemaConfigGrupos {
         }
 
         return configMesclada;
+    }
+
+    // === RECARREGAR CONFIGURAÇÕES DO DISCO ===
+    async recarregarConfiguracoes() {
+        console.log('🔄 Forçando recarga de configurações...');
+        return await this.carregarConfiguracoes();
+    }
+
+    // === VERIFICAR INTEGRIDADE DOS DADOS ===
+    async verificarIntegridade() {
+        try {
+            console.log('🔍 Verificando integridade dos dados...');
+            console.log(`   📊 Dados em memória: ${Object.keys(this.configGrupos).length} grupos`);
+
+            // Verificar arquivo no disco
+            try {
+                const dadosDisco = await fs.readFile(this.ARQUIVO_CONFIG, 'utf8');
+                const configDisco = JSON.parse(dadosDisco);
+                console.log(`   💾 Dados no disco: ${Object.keys(configDisco).length} grupos`);
+
+                // Comparar
+                const gruposMemoria = Object.keys(this.configGrupos).sort();
+                const gruposDisco = Object.keys(configDisco).sort();
+
+                if (JSON.stringify(gruposMemoria) === JSON.stringify(gruposDisco)) {
+                    console.log('   ✅ Memória e disco estão sincronizados!');
+                    return { sincronizado: true, memoria: gruposMemoria.length, disco: gruposDisco.length };
+                } else {
+                    console.log('   ⚠️ ATENÇÃO: Memória e disco DIFERENTES!');
+                    console.log(`   Memória: ${gruposMemoria.join(', ')}`);
+                    console.log(`   Disco: ${gruposDisco.join(', ')}`);
+                    return { sincronizado: false, memoria: gruposMemoria.length, disco: gruposDisco.length };
+                }
+            } catch (error) {
+                console.log('   ⚠️ Arquivo não existe no disco');
+                return { sincronizado: false, memoria: Object.keys(this.configGrupos).length, disco: 0, erro: 'Arquivo não existe' };
+            }
+        } catch (error) {
+            console.error('❌ Erro ao verificar integridade:', error);
+            return { erro: error.message };
+        }
     }
 }
 
