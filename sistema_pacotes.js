@@ -9,13 +9,13 @@ class SistemaPacotes {
         // Configurações da API MariaDB (substitui Google Sheets)
         this.PLANILHAS = {
             // PEDIDOS: API MariaDB local
-            PEDIDOS: process.env.API_PEDIDOS_URL || 'http://localhost:3002/api/pedidos',
+            PEDIDOS: process.env.API_PEDIDOS_URL || 'http://5.182.33.81:3002/api/pedidos',
             // PAGAMENTOS: API MariaDB local
-            PAGAMENTOS: process.env.API_PAGAMENTOS_URL || 'http://localhost:3002/api/pagamentos'
+            PAGAMENTOS: process.env.API_PAGAMENTOS_URL || 'http://5.182.33.81:3002/api/pagamentos'
         };
 
         // API de Pacotes MariaDB
-        this.API_PACOTES_URL = process.env.API_PACOTES_URL || 'http://localhost:3002/api/pacotes';
+        this.API_PACOTES_URL = process.env.API_PACOTES_URL || 'http://5.182.33.81:3002/api/pacotes';
         this.timeout = 5000;
         
         // Tipos de pacotes disponíveis

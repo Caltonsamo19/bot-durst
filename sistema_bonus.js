@@ -9,7 +9,7 @@ class SistemaBonus {
         console.log('💰 Inicializando Sistema de Bônus (MariaDB)...');
 
         // URL da API
-        this.API_URL = process.env.API_BONUS_URL || 'http://localhost:3002/api/bonus';
+        this.API_URL = process.env.API_BONUS_URL || 'http://5.182.33.81:3002/api/bonus';
         this.timeout = 5000;
 
         // Cache em memória para performance

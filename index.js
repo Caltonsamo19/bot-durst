@@ -180,8 +180,8 @@ const SistemaConfigGrupos = require('./sistema_config_grupos');
 
 // === CONFIGURAÇÃO API MARIADB - BOT RETALHO ===
 const API_PEDIDOS_CONFIG = {
-    scriptUrl: process.env.API_PEDIDOS_URL || 'http://localhost:3002/api/pedidos',
-    baseUrl: 'http://localhost:3002',
+    scriptUrl: process.env.API_PEDIDOS_URL || 'http://5.182.33.81:3002/api/pedidos',
+    baseUrl: 'http://5.182.33.81:3002',
     timeout: 5000,
     retryAttempts: 3,
     retryDelay: 500
@@ -189,7 +189,7 @@ const API_PEDIDOS_CONFIG = {
 
 // === CONFIGURAÇÃO API MARIADB - PACOTES ESPECIAIS ===
 const API_DIAMANTE_CONFIG = {
-    scriptUrl: process.env.API_DIAMANTE_URL || 'http://localhost:3002/api/diamante',
+    scriptUrl: process.env.API_DIAMANTE_URL || 'http://5.182.33.81:3002/api/diamante',
     timeout: 5000,
     retryAttempts: 3,
     retryDelay: 500
@@ -218,7 +218,7 @@ const CODIGOS_PACOTES_ESPECIAIS = {
 
 // === CONFIGURAÇÃO API MARIADB - PAGAMENTOS ===
 const API_PAGAMENTOS_CONFIG = {
-    scriptUrl: process.env.API_PAGAMENTOS_URL || 'http://localhost:3002/api/pagamentos',
+    scriptUrl: process.env.API_PAGAMENTOS_URL || 'http://5.182.33.81:3002/api/pagamentos',
     timeout: 5000
 };
 
@@ -4439,7 +4439,7 @@ function agendarSalvamentoHistorico() {
 async function registrarComprador(grupoId, numeroComprador, nomeContato, valorTransferencia) {
     try {
         // Enviar para API MariaDB
-        const response = await axios.post('http://localhost:3002/api/compradores', {
+        const response = await axios.post('http://5.182.33.81:3002/api/compradores', {
             grupo_id: grupoId,
             numero: numeroComprador,
             nome: nomeContato,
