@@ -380,7 +380,7 @@ class SistemaRelatorios {
      * @param {number} precoRevenda - Preço de revenda do grupo (MT/GB)
      */
     gerarTextoRelatorio(dados, grupoNome, periodo, precoRevenda = 16) {
-        let texto = `*📊RELATÓRIO 24H - ${grupoNome}*\n`;
+        let texto = `📊*RELATÓRIO 24H - ${grupoNome}*\n`;
         texto += `📅Período: ${periodo.inicioFormatado} - ${periodo.fimFormatado}\n\n`;
 
         // Seção Vendas

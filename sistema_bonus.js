@@ -1,451 +1,357 @@
-const fs = require('fs').promises;
-const path = require('path');
+const axios = require('axios');
 
 /**
  * Sistema de Gestão de Bônus
- * Baseado no sistema de pacotes automáticos
- * Garante persistência total dos dados de bônus
+ * Usa MariaDB via API para persistência
  */
 class SistemaBonus {
     constructor() {
-        console.log('💰 Inicializando Sistema de Bônus...');
+        console.log('💰 Inicializando Sistema de Bônus (MariaDB)...');
 
-        // Arquivos para persistir dados
-        this.ARQUIVO_BONUS = path.join(__dirname, 'dados_bonus.json');
-        this.ARQUIVO_SAQUES = path.join(__dirname, 'dados_saques.json');
-        this.ARQUIVO_CODIGOS = path.join(__dirname, 'dados_codigos.json');
-        this.ARQUIVO_REFERENCIAS = path.join(__dirname, 'dados_referencias.json');
+        // URL da API
+        this.API_URL = process.env.API_BONUS_URL || 'http://localhost:3002/api/bonus';
+        this.timeout = 5000;
 
-        // Dados em memória
-        this.bonusSaldos = {};        // cliente -> {saldo, historicoSaques, detalhesReferencias}
-        this.pedidosSaque = {};       // referencia -> {cliente, quantidade, status, etc}
-        this.codigosReferencia = {};  // codigo -> {dono, dataGeracao}
-        this.referenciasClientes = {}; // cliente -> {convidadoPor, dataRegistro, etc}
+        // Cache em memória para performance
+        this.bonusSaldos = {};
+        this.pedidosSaque = {};
+        this.codigosReferencia = {};
+        this.referenciasClientes = {};
 
         console.log('💰 Sistema de Bônus inicializado!');
     }
 
-    // === CARREGAR DADOS PERSISTIDOS ===
+    // === CARREGAR DADOS DO MARIADB ===
     async carregarDados() {
-        console.log('💰 Carregando dados de bônus...');
-        console.log(`💰 Diretório: ${__dirname}`);
-        console.log(`💰 Arquivo de bônus: ${this.ARQUIVO_BONUS}`);
+        console.log('💰 Carregando dados de bônus do MariaDB...');
 
         try {
-            // Carregar saldos de bônus
-            try {
-                const dados = await fs.readFile(this.ARQUIVO_BONUS, 'utf8');
-                console.log(`💰 Arquivo lido com sucesso (${dados.length} caracteres)`);
-
-                // PROTEÇÃO: Arquivo vazio
-                if (!dados || dados.trim().length === 0) {
-                    console.log(`⚠️ Arquivo de bônus está VAZIO! Tentando restaurar backup...`);
-                    try {
-                        await this.restaurarBackup(this.ARQUIVO_BONUS, 'bonus');
-                        // Tentar ler novamente após restaurar
-                        const dadosBackup = await fs.readFile(this.ARQUIVO_BONUS, 'utf8');
-                        if (dadosBackup && dadosBackup.trim().length > 0) {
-                            this.bonusSaldos = JSON.parse(dadosBackup);
-                            console.log(`✅ Backup restaurado com sucesso: ${Object.keys(this.bonusSaldos).length} saldos`);
-
-                            // Mostrar exemplos do backup restaurado
-                            const exemplos = Object.entries(this.bonusSaldos).slice(0, 3);
-                            if (exemplos.length > 0) {
-                                console.log(`💰 Saldos restaurados:`);
-                                exemplos.forEach(([cliente, dados]) => {
-                                    console.log(`   - ${cliente}: ${dados.saldo}MB`);
-                                });
-                            }
-                        } else {
-                            console.log(`⚠️ Backup também está vazio - criando arquivo inicial`);
-                            this.bonusSaldos = {};
-                            await fs.writeFile(this.ARQUIVO_BONUS, JSON.stringify({}, null, 2));
-                            console.log(`✅ Arquivo inicial criado`);
-                        }
-                    } catch (backupError) {
-                        console.log(`⚠️ Falha ao restaurar backup: ${backupError.message}`);
-                        console.log(`⚠️ Criando arquivo inicial vazio`);
-                        this.bonusSaldos = {};
-                        await fs.writeFile(this.ARQUIVO_BONUS, JSON.stringify({}, null, 2));
-                        console.log(`✅ Arquivo inicial criado`);
-                    }
-                } else {
-                    this.bonusSaldos = JSON.parse(dados);
-                    console.log(`💰 ${Object.keys(this.bonusSaldos).length} saldos de bônus carregados`);
-
-                    // Mostrar alguns saldos como exemplo
-                    const exemplos = Object.entries(this.bonusSaldos).slice(0, 3);
-                    if (exemplos.length > 0) {
-                        console.log(`💰 Exemplos carregados:`);
-                        exemplos.forEach(([cliente, dados]) => {
-                            console.log(`   - ${cliente}: ${dados.saldo}MB`);
-                        });
-                    }
-                }
-            } catch (error) {
-                console.log(`💰 Erro ao carregar saldos: ${error.message}`);
-                console.log(`💰 Tentando restaurar backup...`);
-                try {
-                    await this.restaurarBackup(this.ARQUIVO_BONUS, 'bonus');
-                    const dadosBackup = await fs.readFile(this.ARQUIVO_BONUS, 'utf8');
-                    this.bonusSaldos = JSON.parse(dadosBackup);
-                    console.log(`✅ Backup restaurado: ${Object.keys(this.bonusSaldos).length} saldos`);
-                } catch (backupError) {
-                    console.log(`⚠️ Nenhum backup disponível - criando arquivo inicial`);
-                    this.bonusSaldos = {};
-                    // Criar arquivo inicial
-                    await fs.writeFile(this.ARQUIVO_BONUS, JSON.stringify({}, null, 2));
-                    console.log(`✅ Arquivo inicial criado`);
-                }
-            }
-
-            // Carregar pedidos de saque
-            try {
-                const dados = await fs.readFile(this.ARQUIVO_SAQUES, 'utf8');
-                this.pedidosSaque = JSON.parse(dados);
-                console.log(`💰 ${Object.keys(this.pedidosSaque).length} pedidos de saque carregados`);
-            } catch (error) {
-                console.log(`💰 Nenhum pedido de saque encontrado - iniciando limpo`);
-                this.pedidosSaque = {};
-            }
-
-            // Carregar códigos de referência
-            try {
-                const dados = await fs.readFile(this.ARQUIVO_CODIGOS, 'utf8');
-                this.codigosReferencia = JSON.parse(dados);
-                console.log(`💰 ${Object.keys(this.codigosReferencia).length} códigos de referência carregados`);
-            } catch (error) {
-                console.log(`💰 Nenhum código de referência encontrado - iniciando limpo`);
-                this.codigosReferencia = {};
-            }
-
-            // Carregar referências de clientes
-            try {
-                const dados = await fs.readFile(this.ARQUIVO_REFERENCIAS, 'utf8');
-                this.referenciasClientes = JSON.parse(dados);
-                console.log(`💰 ${Object.keys(this.referenciasClientes).length} referências de clientes carregadas`);
-            } catch (error) {
-                console.log(`💰 Nenhuma referência de cliente encontrada - iniciando limpo`);
-                this.referenciasClientes = {};
-            }
-
-            console.log('✅ Dados de bônus carregados com sucesso!');
-
-        } catch (error) {
-            console.error(`❌ BONUS: Erro ao carregar dados:`, error);
-        }
-    }
-
-    // === SALVAR DADOS IMEDIATAMENTE ===
-    async salvarDados() {
-        try {
-            console.log(`💾 BONUS: Salvando dados...`);
-
-            // Log de estatísticas antes de salvar
-            const numSaldos = Object.keys(this.bonusSaldos).length;
-            const numSaques = Object.keys(this.pedidosSaque).length;
-            const numCodigos = Object.keys(this.codigosReferencia).length;
-            const numReferencias = Object.keys(this.referenciasClientes).length;
-
-            console.log(`💾 ${numSaldos} saldos, ${numSaques} saques, ${numCodigos} códigos, ${numReferencias} referências`);
-
-            // CRIAR BACKUPS antes de salvar (proteção contra corrupção)
-            await this.criarBackups();
-
-            // Preparar dados em JSON
-            const jsonBonus = JSON.stringify(this.bonusSaldos, null, 2);
-            const jsonSaques = JSON.stringify(this.pedidosSaque, null, 2);
-            const jsonCodigos = JSON.stringify(this.codigosReferencia, null, 2);
-            const jsonReferencias = JSON.stringify(this.referenciasClientes, null, 2);
-
-            // VALIDAR que JSON não está vazio
-            if (numSaldos > 0 && jsonBonus.length < 10) {
-                console.error(`❌ ERRO CRÍTICO: JSON de bônus está vazio mas deveria ter ${numSaldos} saldos!`);
-                console.error(`❌ ABORTANDO salvamento para não perder dados!`);
-                return;
-            }
-
-            // Salvar todos os arquivos em paralelo (mais rápido)
-            const resultados = await Promise.allSettled([
-                fs.writeFile(this.ARQUIVO_BONUS, jsonBonus),
-                fs.writeFile(this.ARQUIVO_SAQUES, jsonSaques),
-                fs.writeFile(this.ARQUIVO_CODIGOS, jsonCodigos),
-                fs.writeFile(this.ARQUIVO_REFERENCIAS, jsonReferencias)
-            ]);
-
-            // Verificar erros
-            const nomeArquivos = ['BONUS', 'SAQUES', 'CODIGOS', 'REFERENCIAS'];
-            const caminhos = [this.ARQUIVO_BONUS, this.ARQUIVO_SAQUES, this.ARQUIVO_CODIGOS, this.ARQUIVO_REFERENCIAS];
-            let erros = 0;
-            resultados.forEach((resultado, index) => {
-                if (resultado.status === 'fulfilled') {
-                    console.log(`   ✅ ${nomeArquivos[index]} salvo em ${caminhos[index]}`);
-                } else {
-                    console.error(`   ❌ ${nomeArquivos[index]} FALHOU:`, resultado.reason);
-                    console.error(`   📁 Caminho: ${caminhos[index]}`);
-                    erros++;
-                }
+            // Verificar se API está disponível
+            const response = await axios.get(`${this.API_URL}/estatisticas`, {
+                timeout: this.timeout
             });
 
-            if (erros === 0) {
-                console.log(`✅ BONUS: Todos os dados salvos com sucesso!`);
-
-                // VERIFICAÇÃO PÓS-SALVAMENTO: Confirmar que arquivo não está vazio
-                await this.verificarIntegridadeArquivos();
-            } else {
-                console.error(`⚠️ BONUS: ${erros} arquivo(s) falharam ao salvar`);
+            if (response.data.success) {
+                const stats = response.data.estatisticas;
+                console.log(`💰 ${stats.total_clientes} clientes com saldo`);
+                console.log(`💰 ${stats.saques_pendentes} saques pendentes`);
+                console.log(`💰 ${stats.codigos_ativos} códigos ativos`);
+                console.log('✅ Sistema de bônus conectado ao MariaDB!');
             }
 
         } catch (error) {
-            console.error(`❌ BONUS: Erro ao salvar dados:`, error);
-            throw error; // Re-throw para quem chamou saber que falhou
+            console.error(`❌ BONUS: Erro ao conectar com MariaDB: ${error.message}`);
+            console.log('⚠️ Sistema de bônus funcionará em modo limitado');
         }
     }
 
-    // === CRIAR BACKUPS ===
-    async criarBackups() {
-        try {
-            const arquivos = [
-                { original: this.ARQUIVO_BONUS, backup: this.ARQUIVO_BONUS + '.backup' },
-                { original: this.ARQUIVO_SAQUES, backup: this.ARQUIVO_SAQUES + '.backup' },
-                { original: this.ARQUIVO_CODIGOS, backup: this.ARQUIVO_CODIGOS + '.backup' },
-                { original: this.ARQUIVO_REFERENCIAS, backup: this.ARQUIVO_REFERENCIAS + '.backup' }
-            ];
-
-            for (const { original, backup } of arquivos) {
-                try {
-                    // Verificar se arquivo original existe
-                    await fs.access(original);
-                    // Copiar para backup
-                    await fs.copyFile(original, backup);
-                } catch (error) {
-                    // Arquivo original não existe, tudo bem
-                }
-            }
-        } catch (error) {
-            console.error(`⚠️ Erro ao criar backups:`, error.message);
-        }
-    }
-
-    // === RESTAURAR BACKUP ===
-    async restaurarBackup(arquivo, tipo) {
-        try {
-            const arquivoBackup = arquivo + '.backup';
-            console.log(`🔄 Tentando restaurar ${tipo} de ${arquivoBackup}...`);
-
-            // Verificar se backup existe
-            await fs.access(arquivoBackup);
-
-            // Copiar backup de volta para original
-            await fs.copyFile(arquivoBackup, arquivo);
-
-            console.log(`✅ Backup de ${tipo} restaurado com sucesso!`);
-        } catch (error) {
-            console.log(`⚠️ Nenhum backup de ${tipo} disponível`);
-            throw error;
-        }
-    }
-
-    // === VERIFICAR INTEGRIDADE DOS ARQUIVOS ===
-    async verificarIntegridadeArquivos() {
-        try {
-            // Verificar arquivo de bônus
-            const dados = await fs.readFile(this.ARQUIVO_BONUS, 'utf8');
-            if (!dados || dados.trim().length === 0) {
-                console.error(`❌ CRÍTICO: Arquivo de bônus ficou VAZIO após salvar!`);
-                console.error(`❌ Tentando restaurar do backup...`);
-                await this.restaurarBackup(this.ARQUIVO_BONUS, 'bonus');
-            } else {
-                const numSaldos = Object.keys(this.bonusSaldos).length;
-                console.log(`✅ Integridade confirmada: ${dados.length} caracteres, ${numSaldos} saldos`);
-            }
-        } catch (error) {
-            console.error(`⚠️ Erro ao verificar integridade:`, error.message);
-        }
+    // === SALVAR DADOS (compatibilidade - não faz nada pois MariaDB salva automaticamente) ===
+    async salvarDados() {
+        // MariaDB salva automaticamente, este método existe apenas para compatibilidade
+        console.log('💾 BONUS: Dados salvos no MariaDB');
     }
 
     // === BUSCAR SALDO DE BÔNUS ===
-    buscarSaldo(clienteId) {
-        // Tentar todos os formatos possíveis
-        const formatos = [
-            clienteId,
-            clienteId.replace('@c.us', '@lid'),
-            clienteId.replace('@lid', '@c.us')
-        ];
+    async buscarSaldo(clienteId) {
+        try {
+            const response = await axios.get(`${this.API_URL}/saldo/${encodeURIComponent(clienteId)}`, {
+                timeout: this.timeout
+            });
 
-        for (const formato of formatos) {
-            if (this.bonusSaldos[formato]) {
-                return this.bonusSaldos[formato];
+            if (response.data.success) {
+                return {
+                    saldo: response.data.saldo,
+                    historicoSaques: [],
+                    detalhesReferencias: response.data.detalhes || {}
+                };
             }
-        }
 
-        return null;
+            return null;
+
+        } catch (error) {
+            console.error(`❌ Erro ao buscar saldo: ${error.message}`);
+            return null;
+        }
     }
 
     // === ATUALIZAR SALDO ===
     async atualizarSaldo(clienteId, callback) {
-        // Buscar em todos os formatos
-        let saldoObj = this.buscarSaldo(clienteId);
+        try {
+            // Buscar saldo atual
+            let saldoObj = await this.buscarSaldo(clienteId);
 
-        // Se não existir, criar novo
-        if (!saldoObj) {
-            saldoObj = {
-                saldo: 0,
-                historicoSaques: [],
-                detalhesReferencias: {}
-            };
+            if (!saldoObj) {
+                saldoObj = {
+                    saldo: 0,
+                    historicoSaques: [],
+                    detalhesReferencias: {}
+                };
+            }
+
+            // Aplicar callback para modificar
+            callback(saldoObj);
+
+            // Salvar no MariaDB
+            await axios.post(`${this.API_URL}/saldo`, {
+                cliente_id: clienteId,
+                saldo: saldoObj.saldo
+            }, {
+                timeout: this.timeout
+            });
+
+            console.log(`💰 Saldo de ${clienteId} atualizado: ${saldoObj.saldo}MB`);
+
+        } catch (error) {
+            console.error(`❌ Erro ao atualizar saldo: ${error.message}`);
         }
-
-        // Aplicar callback para modificar
-        callback(saldoObj);
-
-        // Salvar em todos os formatos (garantir compatibilidade)
-        this.bonusSaldos[clienteId] = saldoObj;
-        this.bonusSaldos[clienteId.replace('@c.us', '@lid')] = saldoObj;
-        this.bonusSaldos[clienteId.replace('@lid', '@c.us')] = saldoObj;
-
-        // Salvar imediatamente no disco
-        await this.salvarDados();
-
-        console.log(`💰 Saldo de ${clienteId} atualizado: ${saldoObj.saldo}MB`);
     }
 
     // === CRIAR PEDIDO DE SAQUE ===
     async criarPedidoSaque(referencia, cliente, nomeCliente, quantidade, numeroDestino, grupo) {
-        const pedido = {
-            referencia: referencia,
-            cliente: cliente,
-            nomeCliente: nomeCliente,
-            quantidade: quantidade,
-            numeroDestino: numeroDestino,
-            dataSolicitacao: new Date().toISOString(),
-            status: 'pendente',
-            grupo: grupo
-        };
+        try {
+            const response = await axios.post(`${this.API_URL}/saque`, {
+                referencia,
+                cliente_id: cliente,
+                nome_cliente: nomeCliente,
+                quantidade,
+                numero_destino: numeroDestino,
+                grupo_id: grupo
+            }, {
+                timeout: this.timeout
+            });
 
-        this.pedidosSaque[referencia] = pedido;
+            if (response.data.success) {
+                console.log(`💰 Pedido de saque criado: ${referencia}`);
+                return {
+                    referencia,
+                    cliente,
+                    nomeCliente,
+                    quantidade,
+                    numeroDestino,
+                    dataSolicitacao: new Date().toISOString(),
+                    status: 'pendente',
+                    grupo
+                };
+            }
 
-        // Salvar imediatamente
-        await this.salvarDados();
+            return null;
 
-        console.log(`💰 Pedido de saque criado: ${referencia}`);
-        return pedido;
+        } catch (error) {
+            console.error(`❌ Erro ao criar pedido de saque: ${error.message}`);
+            return null;
+        }
     }
 
     // === ATUALIZAR STATUS DO PEDIDO ===
     async atualizarStatusPedido(referencia, status, dadosAdicionais = {}) {
-        if (!this.pedidosSaque[referencia]) {
-            console.error(`❌ Pedido ${referencia} não encontrado`);
+        try {
+            const response = await axios.put(`${this.API_URL}/saque/${encodeURIComponent(referencia)}`, {
+                status,
+                erro_detalhes: dadosAdicionais.erroDetalhes || null
+            }, {
+                timeout: this.timeout
+            });
+
+            if (response.data.success) {
+                console.log(`💰 Status do pedido ${referencia} atualizado para: ${status}`);
+                return true;
+            }
+
+            return false;
+
+        } catch (error) {
+            console.error(`❌ Erro ao atualizar status do pedido: ${error.message}`);
             return false;
         }
-
-        this.pedidosSaque[referencia].status = status;
-
-        // Adicionar dados extras (dataEnvio, erroDetalhes, etc)
-        Object.assign(this.pedidosSaque[referencia], dadosAdicionais);
-
-        // Salvar imediatamente
-        await this.salvarDados();
-
-        console.log(`💰 Status do pedido ${referencia} atualizado para: ${status}`);
-        return true;
     }
 
     // === REMOVER PEDIDO ===
     async removerPedido(referencia) {
-        if (this.pedidosSaque[referencia]) {
-            delete this.pedidosSaque[referencia];
+        // Por segurança, apenas atualiza o status para cancelado
+        return await this.atualizarStatusPedido(referencia, 'cancelado');
+    }
 
-            // Salvar imediatamente
-            await this.salvarDados();
+    // === BUSCAR PEDIDO DE SAQUE ===
+    async buscarPedidoSaque(referencia) {
+        try {
+            const response = await axios.get(`${this.API_URL}/saque/${encodeURIComponent(referencia)}`, {
+                timeout: this.timeout
+            });
 
-            console.log(`💰 Pedido ${referencia} removido`);
-            return true;
+            if (response.data.success) {
+                return response.data.saque;
+            }
+
+            return null;
+
+        } catch (error) {
+            return null;
         }
-        return false;
+    }
+
+    // === CRIAR CÓDIGO DE REFERÊNCIA ===
+    async criarCodigoReferencia(codigo, donoId) {
+        try {
+            const response = await axios.post(`${this.API_URL}/codigo`, {
+                codigo,
+                dono_id: donoId
+            }, {
+                timeout: this.timeout
+            });
+
+            if (response.data.success) {
+                console.log(`💰 Código de referência criado: ${codigo}`);
+                return true;
+            }
+
+            return false;
+
+        } catch (error) {
+            console.error(`❌ Erro ao criar código: ${error.message}`);
+            return false;
+        }
+    }
+
+    // === BUSCAR CÓDIGO ===
+    async buscarCodigo(codigo) {
+        try {
+            const response = await axios.get(`${this.API_URL}/codigo/${encodeURIComponent(codigo)}`, {
+                timeout: this.timeout
+            });
+
+            if (response.data.success && response.data.encontrado) {
+                return response.data.codigo;
+            }
+
+            return null;
+
+        } catch (error) {
+            return null;
+        }
+    }
+
+    // === REGISTRAR REFERÊNCIA ===
+    async registrarReferencia(clienteId, convidadoPor, nomeConvidado) {
+        try {
+            const response = await axios.post(`${this.API_URL}/referencia`, {
+                cliente_id: clienteId,
+                convidado_por: convidadoPor,
+                nome_convidado: nomeConvidado
+            }, {
+                timeout: this.timeout
+            });
+
+            if (response.data.success) {
+                console.log(`💰 Referência registrada: ${clienteId} convidado por ${convidadoPor}`);
+                return true;
+            }
+
+            return false;
+
+        } catch (error) {
+            console.error(`❌ Erro ao registrar referência: ${error.message}`);
+            return false;
+        }
+    }
+
+    // === BUSCAR REFERÊNCIA ===
+    async buscarReferencia(clienteId) {
+        try {
+            const response = await axios.get(`${this.API_URL}/referencia/${encodeURIComponent(clienteId)}`, {
+                timeout: this.timeout
+            });
+
+            if (response.data.success && response.data.encontrado) {
+                return response.data.referencia;
+            }
+
+            return null;
+
+        } catch (error) {
+            return null;
+        }
     }
 
     // === PROCESSAR BÔNUS DE COMPRA ===
     async processarBonusCompra(clienteId, megas) {
-        // Buscar quem convidou este cliente
-        let referencia = null;
+        try {
+            const response = await axios.post(`${this.API_URL}/processar-compra`, {
+                cliente_id: clienteId,
+                megas
+            }, {
+                timeout: this.timeout
+            });
 
-        const formatos = [
-            clienteId,
-            clienteId.replace('@c.us', '@lid'),
-            clienteId.replace('@lid', '@c.us')
-        ];
-
-        for (const formato of formatos) {
-            if (this.referenciasClientes[formato]) {
-                referencia = this.referenciasClientes[formato];
-                break;
-            }
-        }
-
-        if (!referencia || !referencia.convidadoPor) {
-            return null; // Cliente não tem referência
-        }
-
-        const convidadorId = referencia.convidadoPor;
-
-        // Verificar se já atingiu limite de 5 compras
-        if (referencia.comprasRealizadas >= 5) {
-            console.log(`💰 Cliente ${clienteId} já atingiu limite de 5 compras`);
-            return null;
-        }
-
-        // Incrementar contador de compras
-        referencia.comprasRealizadas = (referencia.comprasRealizadas || 0) + 1;
-
-        // Atualizar em todos os formatos
-        formatos.forEach(formato => {
-            this.referenciasClientes[formato] = referencia;
-        });
-
-        // Adicionar 200MB ao convidador
-        const bonusMB = 200;
-        await this.atualizarSaldo(convidadorId, (saldoObj) => {
-            saldoObj.saldo += bonusMB;
-
-            // Atualizar detalhes da referência
-            if (!saldoObj.detalhesReferencias) {
-                saldoObj.detalhesReferencias = {};
-            }
-
-            if (!saldoObj.detalhesReferencias[clienteId]) {
-                saldoObj.detalhesReferencias[clienteId] = {
-                    nome: referencia.nomeConvidado || 'Cliente',
-                    compras: 0,
-                    bonusGanho: 0
+            if (response.data.success && response.data.bonus_processado) {
+                console.log(`💰 Bônus processado: ${response.data.bonus_mb}MB para ${response.data.convidador_id}`);
+                return {
+                    convidadorId: response.data.convidador_id,
+                    bonusMB: response.data.bonus_mb,
+                    comprasRealizadas: response.data.compras_realizadas
                 };
             }
 
-            saldoObj.detalhesReferencias[clienteId].compras = referencia.comprasRealizadas;
-            saldoObj.detalhesReferencias[clienteId].bonusGanho += bonusMB;
-        });
+            return null;
 
-        console.log(`💰 Bônus processado: ${bonusMB}MB para ${convidadorId} (compra #${referencia.comprasRealizadas} de ${clienteId})`);
-
-        return {
-            convidadorId,
-            bonusMB,
-            comprasRealizadas: referencia.comprasRealizadas
-        };
+        } catch (error) {
+            console.error(`❌ Erro ao processar bônus: ${error.message}`);
+            return null;
+        }
     }
 
     // === ESTATÍSTICAS ===
-    obterEstatisticas() {
-        const totalClientes = Object.keys(this.bonusSaldos).length;
-        const totalSaques = Object.keys(this.pedidosSaque).length;
-        const saldoTotal = Object.values(this.bonusSaldos).reduce((sum, b) => sum + (b.saldo || 0), 0);
+    async obterEstatisticas() {
+        try {
+            const response = await axios.get(`${this.API_URL}/estatisticas`, {
+                timeout: this.timeout
+            });
 
-        return {
-            totalClientes,
-            totalSaques,
-            saldoTotal,
-            saldoMedio: totalClientes > 0 ? Math.round(saldoTotal / totalClientes) : 0
-        };
+            if (response.data.success) {
+                return {
+                    totalClientes: response.data.estatisticas.total_clientes,
+                    totalSaques: response.data.estatisticas.saques_pendentes,
+                    saldoTotal: response.data.estatisticas.saldo_total,
+                    saldoMedio: response.data.estatisticas.total_clientes > 0
+                        ? Math.round(response.data.estatisticas.saldo_total / response.data.estatisticas.total_clientes)
+                        : 0
+                };
+            }
+
+            return {
+                totalClientes: 0,
+                totalSaques: 0,
+                saldoTotal: 0,
+                saldoMedio: 0
+            };
+
+        } catch (error) {
+            console.error(`❌ Erro ao obter estatísticas: ${error.message}`);
+            return {
+                totalClientes: 0,
+                totalSaques: 0,
+                saldoTotal: 0,
+                saldoMedio: 0
+            };
+        }
+    }
+
+    // === LISTAR SAQUES PENDENTES ===
+    async listarSaquesPendentes() {
+        try {
+            const response = await axios.get(`${this.API_URL}/saques/pendentes`, {
+                timeout: this.timeout
+            });
+
+            if (response.data.success) {
+                return response.data.saques;
+            }
+
+            return [];
+
+        } catch (error) {
+            console.error(`❌ Erro ao listar saques pendentes: ${error.message}`);
+            return [];
+        }
     }
 }
 

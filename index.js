@@ -112,7 +112,7 @@ async function axiosComRetry(config, maxTentativas = 3) {
             const ehUltimaTentativa = tentativa === maxTentativas;
 
             if (ehTimeout && !ehUltimaTentativa) {
-                // Aumentado delay progressivo: 3s, 5s, 7s (para dar tempo do cache do Google Sheets)
+                // Aumentado delay progressivo: 3s, 5s, 7s (para dar tempo do cache do API MariaDB)
                 const delayMs = Math.min(3000 + (2000 * (tentativa - 1)), 10000); // 3s, 5s, 7s
                 console.log(`⏳ Timeout na tentativa ${tentativa}/${maxTentativas}, aguardando ${delayMs}ms antes de tentar novamente...`);
                 await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -178,22 +178,21 @@ const SistemaBonus = require('./sistema_bonus');
 // === IMPORTAR SISTEMA DE CONFIGURAÇÃO DE GRUPOS ===
 const SistemaConfigGrupos = require('./sistema_config_grupos');
 
-// === CONFIGURAÇÃO GOOGLE SHEETS - BOT RETALHO (SCRIPT PRÓPRIO) ===
-const GOOGLE_SHEETS_CONFIG = {
-    scriptUrl: process.env.GOOGLE_SHEETS_SCRIPT_URL_RETALHO || 'https://script.google.com/macros/s/AKfycbyMilUC5bYKGXV95LR4MmyaRHzMf6WCmXeuztpN0tDpQ9_2qkgCxMipSVqYK_Q6twZG/exec',
-    planilhaUrl: 'https://docs.google.com/spreadsheets/d/1vIv1Y0Hiu6NHEG37ubbFoa_vfbEe6sAb9I4JH-P38BQ/edit',
-    planilhaId: '1vIv1Y0Hiu6NHEG37ubbFoa_vfbEe6sAb9I4JH-P38BQ',
-    timeout: 30000,
+// === CONFIGURAÇÃO API MARIADB - BOT RETALHO ===
+const API_PEDIDOS_CONFIG = {
+    scriptUrl: process.env.API_PEDIDOS_URL || 'http://localhost:3002/api/pedidos',
+    baseUrl: 'http://localhost:3002',
+    timeout: 5000,
     retryAttempts: 3,
-    retryDelay: 2000
+    retryDelay: 500
 };
 
-// === CONFIGURAÇÃO GOOGLE SHEETS - PACOTES ESPECIAIS ===
-const GOOGLE_SHEETS_CONFIG_DIAMANTE = {
-    scriptUrl: process.env.GOOGLE_SHEETS_SCRIPT_URL_DIAMANTE || 'https://script.google.com/macros/s/AKfycbw_wHnKiZROpl720GduLz-KvVw4pEtS8njzPvHCnqdWgYHFRIoXlUCxrNpqt7OnZsr8/exec',
-    timeout: 30000,
+// === CONFIGURAÇÃO API MARIADB - PACOTES ESPECIAIS ===
+const API_DIAMANTE_CONFIG = {
+    scriptUrl: process.env.API_DIAMANTE_URL || 'http://localhost:3002/api/diamante',
+    timeout: 5000,
     retryAttempts: 3,
-    retryDelay: 2000
+    retryDelay: 500
 };
 
 // === MAPEAMENTO DE CÓDIGOS DE PACOTES ESPECIAIS ===
@@ -217,13 +216,13 @@ const CODIGOS_PACOTES_ESPECIAIS = {
     // 4: { nome: 'Pacote Y', ... },
 };
 
-// === CONFIGURAÇÃO DE PAGAMENTOS (MESMA PLANILHA DO BOT ATACADO) ===
-const PAGAMENTOS_CONFIG = {
-    scriptUrl: 'https://script.google.com/macros/s/AKfycbzzifHGu1JXc2etzG3vqK5Jd3ihtULKezUTQQIDJNsr6tXx3CmVmKkOlsld0x1Feo0H/exec',
-    timeout: 30000
+// === CONFIGURAÇÃO API MARIADB - PAGAMENTOS ===
+const API_PAGAMENTOS_CONFIG = {
+    scriptUrl: process.env.API_PAGAMENTOS_URL || 'http://localhost:3002/api/pagamentos',
+    timeout: 5000
 };
 
-console.log(`📊 Google Sheets configurado (Comum + Diamante)`);
+console.log(`📊 API MariaDB configurada (Pedidos + Diamante + Pagamentos)`);
 
 // Função helper para reply com fallback
 async function safeReply(message, client, texto) {
@@ -238,6 +237,43 @@ async function safeReply(message, client, texto) {
             throw fallbackError;
         }
     }
+}
+
+// === FUNÇÃO DE NORMALIZAÇÃO DE NÚMEROS DE TELEFONE ===
+/**
+ * Normaliza números de telefone removendo espaços, caracteres especiais e códigos de país
+ * Suporta formatos:
+ * - Internacional: +258 849 123 456, 258849123456
+ * - Nacional: 849 123 456, 849123456
+ * - Com formatação: (849) 123-456, 849-123-456
+ * @param {string} numero - Número de telefone a normalizar
+ * @returns {string} - Número normalizado (apenas dígitos, sem código de país)
+ */
+function normalizarNumeroTelefone(numero) {
+    if (!numero) return '';
+
+    // Remover todos os caracteres não numéricos
+    let numeroLimpo = String(numero).replace(/[^0-9]/g, '');
+
+    // Remover código de país 258 se presente
+    if (numeroLimpo.startsWith('258') && numeroLimpo.length > 9) {
+        numeroLimpo = numeroLimpo.substring(3);
+    }
+
+    // Garantir que temos pelo menos 9 dígitos
+    if (numeroLimpo.length < 9) {
+        return ''; // Número inválido
+    }
+
+    // Pegar os últimos 9 dígitos (formato moçambicano padrão)
+    const numero9digitos = numeroLimpo.slice(-9);
+
+    // Validar que é número Vodacom (começa com 84 ou 85)
+    if (!numero9digitos.startsWith('84') && !numero9digitos.startsWith('85')) {
+        return ''; // Não é Vodacom
+    }
+
+    return numero9digitos;
 }
 
 // Criar instância do cliente (SEGUINDO PADRÃO BOT1)
@@ -524,8 +560,8 @@ const MAX_RETRY_ATTEMPTS = 12; // 12 tentativas em 5 minutos (1 a cada 25s)
 
 // === CONTROLE DE RATE LIMITING ===
 let ultimaRequisicao = 0;
-const DELAY_ENTRE_REQUISICOES = 3000; // 3 segundos entre cada verificação (otimizado para planilha pequena com 48h de dados)
-const MAX_REQUISICOES_POR_MINUTO = 20; // Aumentado para 20 req/min
+const DELAY_ENTRE_REQUISICOES = 500; // 500ms entre cada verificação (otimizado para API MariaDB local)
+const MAX_REQUISICOES_POR_MINUTO = 60; // Aumentado para 60 req/min (MariaDB não tem rate limit)
 let requisicoesUltimoMinuto = [];
 let erros429Consecutivos = 0;
 const MAX_ERROS_429 = 3; // Após 3 erros 429, pausar temporariamente
@@ -1891,7 +1927,7 @@ async function verificarPagamentoIndividual(referencia, valorEsperado) {
         // Primeira tentativa: busca pelo valor exato (COM RETRY AUTOMÁTICO)
         let response = await axiosComRetry({
             method: 'post',
-            url: PAGAMENTOS_CONFIG.scriptUrl,
+            url: API_PAGAMENTOS_CONFIG.scriptUrl,
             data: {
                 action: "buscar_por_referencia",
                 referencia: referencia,
@@ -1963,7 +1999,7 @@ async function marcarPagamentoComoProcessado(referencia, valor) {
 
         const response = await axiosComRetry({
             method: 'post',
-            url: PAGAMENTOS_CONFIG.scriptUrl,
+            url: API_PAGAMENTOS_CONFIG.scriptUrl,
             data: {
                 action: "marcar_processado",
                 referencia: referencia,
@@ -2250,7 +2286,7 @@ async function processarPagamentoConfirmado(pendencia) {
         const bonusInfo = await processarBonusCompra(chatId, megas, chatId);
 
         // Enviar para Tasker/Planilha
-        const resultadoEnvio = await enviarParaTasker(referencia, megas, numero, chatId, messageData.author);
+        const resultadoEnvio = await enviarParaTasker(referencia, megas, numero, chatId, messageData.author, pendencia.valorComprovante);
 
         // Verificar duplicatas
         if (resultadoEnvio && resultadoEnvio.duplicado) {
@@ -2320,7 +2356,13 @@ const ADMINISTRADORES_GLOBAIS = [
     '258879914172@c.us',    // +258 87 991 4172 - walter
     '40811249045561@lid',   // @lid do walter
     '258844345161@c.us',    // +258 84 434 5161 - Mozstream's
-    '144478891450544@lid'   // @lid do Mozstream's
+    '144478891450544@lid',  // @lid do Mozstream's
+    '258849430041@c.us',    // +258 84 943 0041 - Junior Zucula
+    '216329281892468@lid',  // @lid do Junior Zucula
+    '258842577015@c.us',    // +258 84 257 7015 - Ercílio (2º número)
+    '113267548680269@lid',  // @lid do Ercílio (2º número)
+    '258876264874@c.us',    // +258 87 626 4874 - Alln
+    '92522890170444@lid'    // @lid do Alln
 ];
 
 // Mapeamento de IDs internos (@lid) para números reais (@c.us) - SISTEMA DINÂMICO
@@ -2337,7 +2379,10 @@ let MAPEAMENTO_IDS = {
     '29945149558840@lid': '258857013922@c.us',   // Frederico
     '49603198071035@lid': '258871784594@c.us',   // Shop NET
     '40811249045561@lid': '258879914172@c.us',   // walter
-    '144478891450544@lid': '258844345161@c.us'   // Mozstream's
+    '144478891450544@lid': '258844345161@c.us',  // Mozstream's
+    '216329281892468@lid': '258849430041@c.us',  // Junior Zucula
+    '113267548680269@lid': '258842577015@c.us',  // Ercílio (2º número)
+    '92522890170444@lid': '258876264874@c.us'    // Alln
 };
 
 // === SISTEMA AUTOMÁTICO DE MAPEAMENTO LID ===
@@ -2433,8 +2478,166 @@ const MODERACAO_CONFIG = {
         '258861645968@c.us',
         '258871112049@c.us',
         '258852118624@c.us'
-    ]
+    ],
+    // Configuração Anti-Spam
+    antiSpam: {
+        ativado: true,
+        maxMensagensIguais: 5, // Máximo de mensagens iguais permitidas
+        intervaloSegundos: 60, // Janela de tempo em segundos
+        removerUsuario: false, // Desativado - apenas apaga mensagens
+        apagarMensagens: true
+    }
 };
+
+// === CACHE ANTI-SPAM ===
+// Estrutura: { 'groupId': { 'userId': { 'mensagemHash': [{ timestamp, messageId }] } } }
+const antiSpamCache = new Map();
+
+// Função para limpar cache antigo (mensagens fora da janela de tempo)
+function limparCacheAntiSpam() {
+    const agora = Date.now();
+    const intervaloMs = MODERACAO_CONFIG.antiSpam.intervaloSegundos * 1000;
+
+    for (const [groupId, usuarios] of antiSpamCache.entries()) {
+        for (const [userId, mensagens] of usuarios.entries()) {
+            for (const [hash, lista] of mensagens.entries()) {
+                const listaFiltrada = lista.filter(item => (agora - item.timestamp) < intervaloMs);
+                if (listaFiltrada.length === 0) {
+                    mensagens.delete(hash);
+                } else {
+                    mensagens.set(hash, listaFiltrada);
+                }
+            }
+            if (mensagens.size === 0) {
+                usuarios.delete(userId);
+            }
+        }
+        if (usuarios.size === 0) {
+            antiSpamCache.delete(groupId);
+        }
+    }
+}
+
+// Limpar cache a cada 30 segundos
+setInterval(limparCacheAntiSpam, 30000);
+
+// Função para verificar e registrar spam
+async function verificarAntiSpam(message, client) {
+    if (!MODERACAO_CONFIG.antiSpam.ativado) return false;
+
+    const chatId = message.from;
+    const authorId = message.author || message.from;
+    const conteudo = message.body.trim().toLowerCase();
+
+    // Ignorar mensagens vazias
+    if (!conteudo) return false;
+
+    // Verificar se é grupo monitorado
+    const ativadoExplicit = CONFIGURACAO_GRUPOS.hasOwnProperty(chatId) ||
+        (MODERACAO_CONFIG.ativado && MODERACAO_CONFIG.ativado[chatId]);
+
+    if (!ativadoExplicit) return false;
+
+    // Ignorar exceções e admins
+    if (MODERACAO_CONFIG.excecoes.includes(authorId) || isAdministrador(authorId)) {
+        return false;
+    }
+
+    // Criar hash simples da mensagem
+    const mensagemHash = conteudo;
+    const agora = Date.now();
+    const intervaloMs = MODERACAO_CONFIG.antiSpam.intervaloSegundos * 1000;
+
+    // Inicializar estruturas se não existirem
+    if (!antiSpamCache.has(chatId)) {
+        antiSpamCache.set(chatId, new Map());
+    }
+    const grupoCache = antiSpamCache.get(chatId);
+
+    if (!grupoCache.has(authorId)) {
+        grupoCache.set(authorId, new Map());
+    }
+    const usuarioCache = grupoCache.get(authorId);
+
+    if (!usuarioCache.has(mensagemHash)) {
+        usuarioCache.set(mensagemHash, []);
+    }
+    const listaMensagens = usuarioCache.get(mensagemHash);
+
+    // Adicionar mensagem atual
+    listaMensagens.push({
+        timestamp: agora,
+        messageId: message.id._serialized,
+        message: message
+    });
+
+    // Filtrar apenas mensagens dentro da janela de tempo
+    const mensagensRecentes = listaMensagens.filter(item => (agora - item.timestamp) < intervaloMs);
+    usuarioCache.set(mensagemHash, mensagensRecentes);
+
+    // Verificar se atingiu o limite de spam
+    if (mensagensRecentes.length >= MODERACAO_CONFIG.antiSpam.maxMensagensIguais) {
+        console.log(`🚨 SPAM DETECTADO: ${authorId} enviou ${mensagensRecentes.length} mensagens iguais em ${MODERACAO_CONFIG.antiSpam.intervaloSegundos}s`);
+
+        // Apagar todas as mensagens de spam
+        if (MODERACAO_CONFIG.antiSpam.apagarMensagens) {
+            for (const item of mensagensRecentes) {
+                try {
+                    if (item.message && typeof item.message.delete === 'function') {
+                        await item.message.delete(true);
+                        console.log(`🗑️ Mensagem de spam deletada`);
+                    }
+                } catch (err) {
+                    console.error('❌ Erro ao deletar mensagem de spam:', err.message);
+                }
+            }
+        }
+
+        // Remover usuário
+        if (MODERACAO_CONFIG.antiSpam.removerUsuario) {
+            let mentionId = String(authorId).replace('@c.us', '').replace('@lid', '');
+            let nomeExibicao = mentionId;
+
+            try {
+                const contato = await client.getContactById(authorId);
+                if (contato) {
+                    nomeExibicao = contato.pushname || contato.name || contato.number || mentionId;
+                }
+            } catch (err) {
+                // ignora erro
+            }
+
+            // Enviar aviso
+            try {
+                const ehIDValido = authorId &&
+                    typeof authorId === 'string' &&
+                    (authorId.includes('@c.us') || authorId.includes('@lid')) &&
+                    !authorId.startsWith('SAQUE_BONUS_') &&
+                    !authorId.startsWith('SAQ');
+
+                const aviso = `🚫 @${mentionId} foi removido(a) do grupo por SPAM (${mensagensRecentes.length} mensagens iguais em menos de 1 minuto).`;
+
+                if (ehIDValido) {
+                    await client.sendMessage(chatId, aviso, { mentions: [authorId] });
+                } else {
+                    await client.sendMessage(chatId, aviso);
+                }
+            } catch (errAviso) {
+                console.log('⚠️ Não foi possível enviar aviso de spam:', errAviso.message);
+            }
+
+            // Remover participante
+            await removerParticipante(chatId, authorId, `SPAM: ${mensagensRecentes.length} mensagens iguais`);
+        }
+
+        // Limpar cache do usuário após ação
+        usuarioCache.delete(mensagemHash);
+
+        return true; // Spam detectado e tratado
+    }
+
+    return false; // Não é spam
+}
 
 // Configuração para cada grupo
 const CONFIGURACAO_GRUPOS = {
@@ -2859,9 +3062,110 @@ Sempre conectado, sempre no controle!
 
 📩 Envie o comprovativo, após o pagamento e o número que receberá os dados!
 `
+    },
+'120363422150610418@g.us': {
+        nome: 'MozStreaming MB’s vV3*',
+        tabela: `TABELA ATUALIZADA
+
+INTERNET & CHAMADAS ILIMITADAS 
+
+Vodacom 
+PACOTES DIÁRIOS — 24H
+
+600MB = 10MT
+800MB = 15MT
+1024MB = 17MT
+1200MB = 20MT
+2048MB = 34MT
+
+2400MB = 40MT
+3072MB = 51MT
+4096MB = 68MT
+5120MB = 85MT
+6144MB = 102MT
+7168MB = 119MT
+8192MB = 136MT
+9144MB = 153MT
+10240MB = 170MT
+
+PACOTES PREMIUM — 3 DIAS (Renováveis)
+
+2000MB = 44MT
+3000MB = 66MT
+4000MB = 88MT
+5000MB = 109MT
+6000MB = 133MT
+7000MB = 149MT
+10000MB = 219MT
+
+Bônus: +100MB ao atualizar dentro de 3 dias
+
+SEMANAIS BÁSICOS — 5 DIAS (Renováveis)
+
+1700MB = 45MT
+2900MB = 80MT
+3400MB = 110MT
+5500MB = 150MT
+7800MB = 200MT
+11400MB = 300MT
+
+Bônus: +100MB ao atualizar dentro de 5 dias
+
+PACOTES MENSAIS — 30 DIAS (Não Renováveis)
+
+2.8GB = 100MT
+5.8GB = 175MT
+8.8GB = 200MT
+10.8GB = 249MT
+12.8GB = 300MT
+15.8GB = 349MT
+18.8GB = 400MT
+20.8GB = 449MT
+25.8GB = 549MT
+32.8GB = 649MT
+51.2GB = 1049MT
+60.2GB = 1249MT
+80.2GB = 1449MT
+100.2GB = 1700MT
+
+Observação: Pacotes mensais não compatíveis com Txuna
+
+CHAMADAS ILIMITADAS — VODACOM
+
+11GB = 449MT
+14.5GB = 500MT
+26.5GB = 700MT
+37.5GB = 1000MT
+53.5GB = 1500MT
+102.5GB = 2150MT
+
+CHAMADAS ILIMITADAS — MOVITEL
+
+9GB = 469MT
+23GB = 950MT
+38GB = 1450MT
+46GB = 1700MT
+53GB = 1900MT
+68GB = 2400MT
+
+CONEXÃO SEM LIMITES
+
+Internet rápida • Chamadas ilimitadas • SMS ilimitados
+Pacotes atualizados e confiáveis.`,
+
+        pagamento: `💸 FORMAS DE PAGAMENTO
+
+🟠 E-Mola – Glória | 📲 860186270  
+🔴 M-Pesa – Leonor | 📲 857451196  
+
+⚠ ATENÇÃO  
+▪ Após o pagamento, envie a confirmação ✉ ** e o seu número para receber o seu pacote 📲  
+▪ Envie ** o valor exato da tabela 💰  
+
+NB: Válido apenas para Vodacom  
+🚀 Garanta seus Megabytes agora!`
     }
 };
-
 
 
 // === FUNÇÃO GOOGLE SHEETS ===
@@ -2899,14 +3203,14 @@ async function enviarParaGoogleSheets(referencia, valor, numero, grupoId, grupoN
     };
 
     try {
-        console.log(`📊 Enviando para Google Sheets: ${referencia}`);
+        console.log(`📊 Enviando para API MariaDB: ${referencia}`);
         console.log(`🔍 Dados enviados:`, JSON.stringify(dados, null, 2));
-        console.log(`🔗 URL destino:`, GOOGLE_SHEETS_CONFIG.scriptUrl);
+        console.log(`🔗 URL destino:`, API_PEDIDOS_CONFIG.scriptUrl);
 
-        // Usar axios COM RETRY para Google Sheets
+        // Usar axios COM RETRY para API MariaDB
         const response = await axiosComRetry({
             method: 'post',
-            url: GOOGLE_SHEETS_CONFIG.scriptUrl,
+            url: API_PEDIDOS_CONFIG.scriptUrl,
             data: dados,
             headers: {
                 'Content-Type': 'application/json',
@@ -2916,15 +3220,15 @@ async function enviarParaGoogleSheets(referencia, valor, numero, grupoId, grupoN
         
         // Google Apps Script agora retorna JSON
         const responseData = response.data;
-        console.log(`📥 Resposta Google Sheets:`, JSON.stringify(responseData, null, 2));
+        console.log(`📥 Resposta API MariaDB:`, JSON.stringify(responseData, null, 2));
 
         // Verificar se é uma resposta JSON válida
         if (typeof responseData === 'object') {
             if (responseData.success) {
-                console.log(`✅ Google Sheets: Dados enviados!`);
+                console.log(`✅ API MariaDB: Dados enviados!`);
                 return { sucesso: true, referencia: responseData.referencia, duplicado: false };
             } else if (responseData.duplicado) {
-                console.log(`⚠️ Google Sheets: Pedido duplicado detectado - ${responseData.referencia} (Status: ${responseData.status_existente})`);
+                console.log(`⚠️ API MariaDB: Pedido duplicado detectado - ${responseData.referencia} (Status: ${responseData.status_existente})`);
                 return {
                     sucesso: false,
                     duplicado: true,
@@ -2939,7 +3243,7 @@ async function enviarParaGoogleSheets(referencia, valor, numero, grupoId, grupoN
             // Fallback para compatibilidade com resposta em texto
             const responseText = String(responseData);
             if (responseText.includes('Sucesso!')) {
-                console.log(`✅ Google Sheets: Dados enviados!`);
+                console.log(`✅ API MariaDB: Dados enviados!`);
                 return { sucesso: true, row: 'N/A', duplicado: false };
             } else if (responseText.includes('Erro:')) {
                 throw new Error(responseText);
@@ -2952,19 +3256,19 @@ async function enviarParaGoogleSheets(referencia, valor, numero, grupoId, grupoN
         // Tratar erro 429 especificamente
         if (error.response && error.response.status === 429) {
             erros429Consecutivos++;
-            console.error(`🚨 Google Sheets: Rate limit atingido (429) - Erro ${erros429Consecutivos}/${MAX_ERROS_429}`);
+            console.error(`🚨 API MariaDB: Rate limit atingido (429) - Erro ${erros429Consecutivos}/${MAX_ERROS_429}`);
 
             // Pausar se necessário
             if (erros429Consecutivos >= MAX_ERROS_429) {
                 const pausaEmergencia = 2 * 60 * 1000;
-                console.error(`⏸️ Google Sheets: Pausando envios por ${pausaEmergencia/1000}s devido a múltiplos erros 429`);
+                console.error(`⏸️ API MariaDB: Pausando envios por ${pausaEmergencia/1000}s devido a múltiplos erros 429`);
                 await new Promise(resolve => setTimeout(resolve, pausaEmergencia));
                 erros429Consecutivos = 0;
             }
             return { sucesso: false, erro: 'Rate limit atingido, tentando novamente em instantes...' };
         }
 
-        console.error(`❌ Erro Google Sheets [${grupoNome}]: ${error.message}`);
+        console.error(`❌ Erro API MariaDB [${grupoNome}]: ${error.message}`);
         return { sucesso: false, erro: error.message };
     }
 }
@@ -2990,14 +3294,14 @@ async function enviarParaGoogleSheetsDiamante(referencia, numero, codigoPacote, 
     };
 
     try {
-        console.log(`💎 Enviando para Google Sheets DIAMANTE: ${referencia}`);
+        console.log(`💎 Enviando para API MariaDB DIAMANTE: ${referencia}`);
         console.log(`🔍 Dados enviados:`, JSON.stringify(dados, null, 2));
-        console.log(`🔗 URL destino:`, GOOGLE_SHEETS_CONFIG_DIAMANTE.scriptUrl);
+        console.log(`🔗 URL destino:`, API_DIAMANTE_CONFIG.scriptUrl);
 
-        // Usar axios COM RETRY para Google Sheets Diamante
+        // Usar axios COM RETRY para API MariaDB Diamante
         const response = await axiosComRetry({
             method: 'post',
-            url: GOOGLE_SHEETS_CONFIG_DIAMANTE.scriptUrl,
+            url: API_DIAMANTE_CONFIG.scriptUrl,
             data: dados,
             headers: {
                 'Content-Type': 'application/json',
@@ -3006,15 +3310,15 @@ async function enviarParaGoogleSheetsDiamante(referencia, numero, codigoPacote, 
         }, 3); // 3 tentativas
 
         const responseData = response.data;
-        console.log(`📥 Resposta Google Sheets Diamante:`, JSON.stringify(responseData, null, 2));
+        console.log(`📥 Resposta API MariaDB Diamante:`, JSON.stringify(responseData, null, 2));
 
         // Verificar se é uma resposta JSON válida
         if (typeof responseData === 'object') {
             if (responseData.success) {
-                console.log(`✅ Google Sheets Diamante: Dados enviados!`);
+                console.log(`✅ API MariaDB Diamante: Dados enviados!`);
                 return { sucesso: true, referencia: responseData.referencia, duplicado: false };
             } else if (responseData.duplicado) {
-                console.log(`⚠️ Google Sheets Diamante: Pedido duplicado detectado - ${responseData.referencia} (Status: ${responseData.status_existente})`);
+                console.log(`⚠️ API MariaDB Diamante: Pedido duplicado detectado - ${responseData.referencia} (Status: ${responseData.status_existente})`);
                 return {
                     sucesso: false,
                     duplicado: true,
@@ -3029,7 +3333,7 @@ async function enviarParaGoogleSheetsDiamante(referencia, numero, codigoPacote, 
             // Fallback para compatibilidade com resposta em texto
             const responseText = String(responseData);
             if (responseText.includes('Sucesso!')) {
-                console.log(`✅ Google Sheets Diamante: Dados enviados!`);
+                console.log(`✅ API MariaDB Diamante: Dados enviados!`);
                 return { sucesso: true, row: 'N/A', duplicado: false };
             } else if (responseText.includes('Erro:')) {
                 throw new Error(responseText);
@@ -3042,19 +3346,19 @@ async function enviarParaGoogleSheetsDiamante(referencia, numero, codigoPacote, 
         // Tratar erro 429 especificamente
         if (error.response && error.response.status === 429) {
             erros429Consecutivos++;
-            console.error(`🚨 Google Sheets Diamante: Rate limit atingido (429) - Erro ${erros429Consecutivos}/${MAX_ERROS_429}`);
+            console.error(`🚨 API MariaDB Diamante: Rate limit atingido (429) - Erro ${erros429Consecutivos}/${MAX_ERROS_429}`);
 
             // Pausar se necessário
             if (erros429Consecutivos >= MAX_ERROS_429) {
                 const pausaEmergencia = 2 * 60 * 1000;
-                console.error(`⏸️ Google Sheets Diamante: Pausando envios por ${pausaEmergencia/1000}s devido a múltiplos erros 429`);
+                console.error(`⏸️ API MariaDB Diamante: Pausando envios por ${pausaEmergencia/1000}s devido a múltiplos erros 429`);
                 await new Promise(resolve => setTimeout(resolve, pausaEmergencia));
                 erros429Consecutivos = 0;
             }
             return { sucesso: false, erro: 'Rate limit atingido, tentando novamente em instantes...' };
         }
 
-        console.error(`❌ Erro Google Sheets Diamante [${grupoNome}]: ${error.message}`);
+        console.error(`❌ Erro API MariaDB Diamante [${grupoNome}]: ${error.message}`);
         return { sucesso: false, erro: error.message };
     }
 }
@@ -3303,7 +3607,7 @@ async function processarPacotePonto8(comprovante, configGrupo, pacoteDiamante) {
 }
 
 // === FUNÇÃO PRINCIPAL PARA TASKER ===
-async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensagem) {
+async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensagem, valorMT = null) {
     const grupoNome = getConfiguracaoGrupo(grupoId)?.nome || 'Desconhecido';
     const timestamp = new Date().toLocaleString('pt-BR');
     const linhaCompleta = `${referencia}|${valor}|${numero}`;
@@ -3338,12 +3642,12 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
         };
     }
 
-    // Validar URL do Google Sheets
-    if (!GOOGLE_SHEETS_CONFIG.scriptUrl || GOOGLE_SHEETS_CONFIG.scriptUrl === '') {
-        console.error(`❌ VALIDAÇÃO FALHOU: URL do Google Sheets não configurada`);
+    // Validar URL do API MariaDB
+    if (!API_PEDIDOS_CONFIG.scriptUrl || API_PEDIDOS_CONFIG.scriptUrl === '') {
+        console.error(`❌ VALIDAÇÃO FALHOU: URL do API MariaDB não configurada`);
         return {
             sucesso: false,
-            erro: 'Google Sheets não configurado'
+            erro: 'API MariaDB não configurado'
         };
     }
 
@@ -3368,7 +3672,7 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
         tentativas++;
 
         try {
-            console.log(`🔄 Tentativa ${tentativas}/${maxTentativas} de envio para Google Sheets...`);
+            console.log(`🔄 Tentativa ${tentativas}/${maxTentativas} de envio para API MariaDB...`);
             resultado = await enviarParaGoogleSheets(referencia, valor, numero, grupoId, grupoNome, autorMensagem);
 
             if (resultado.sucesso) {
@@ -3404,7 +3708,7 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
             transacao.metodo = 'google_sheets';
             transacao.row = resultado.row;
         }
-        console.log(`✅ [${grupoNome}] Enviado para Google Sheets com sucesso! Row: ${resultado.row}`);
+        console.log(`✅ [${grupoNome}] Enviado para API MariaDB com sucesso! Row: ${resultado.row}`);
 
         // === REGISTRAR COMPRA PENDENTE NO SISTEMA DE COMPRAS ===
         if (sistemaCompras) {
@@ -3433,8 +3737,13 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
 
                 for (const [tipoDias, listaPacotes] of Object.entries(pacotesRenovaveis)) {
                     for (const pacote of listaPacotes) {
-                        // Comparar com tolerância de 1%
-                        if (Math.abs(pacote.mb - valor) <= (valor * 0.01)) {
+                        // Comparar MB com tolerância de 1%
+                        const mbMatch = Math.abs(pacote.mb - valor) <= (valor * 0.01);
+
+                        // Se valorMT foi fornecido, também comparar o valor MT
+                        const mtMatch = valorMT ? (parseInt(pacote.valor) === parseInt(valorMT)) : true;
+
+                        if (mbMatch && mtMatch) {
                             valorMTEncontrado = pacote.valor;
                             tipoPacoteDetectado = tipoDias;
                             break;
@@ -3447,7 +3756,8 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
                     console.log(`🎯 PACOTES: Detectado pacote de ${tipoPacoteDetectado} dias - Ativando automaticamente!`);
                     console.log(`   📋 Referência: ${referencia}`);
                     console.log(`   📱 Número: ${numero}`);
-                    console.log(`   💰 Valor: ${valorMTEncontrado}MT`);
+                    console.log(`   💰 Valor Pago: ${valorMT || 'N/A'}MT`);
+                    console.log(`   💰 Valor do Pacote: ${valorMTEncontrado}MT`);
                     console.log(`   📊 Megas: ${valor}MB`);
 
                     // Ativar pacote automático
@@ -3456,7 +3766,8 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
                         numero,
                         grupoId,
                         tipoPacoteDetectado,
-                        new Date() // Horário de ativação = agora
+                        valor, // Megas do pacote inicial (ex: 2000MB)
+                        valorMTEncontrado // Valor em MT do pacote inicial (ex: 44MT)
                     );
 
                     if (resultadoPacote.sucesso) {
@@ -3483,7 +3794,7 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
                                 `📅 *Validade Total:* Até ${dataExpiracao.toLocaleDateString('pt-BR')}\n\n` +
                                 `💡 *Como funciona:*\n` +
                                 `O sistema enviará automaticamente 100MB por dia durante ${tipoPacoteDetectado} dias para manter seu pacote principal válido.\n\n` +
-                                `✨ *Total de dados:* ${valor}MB + ${parseInt(tipoPacoteDetectado) * 100}MB bônus = ${valor + (parseInt(tipoPacoteDetectado) * 100)}MB!`;
+                                `✨ *Total de dados:* ${valor}MB + ${parseInt(tipoPacoteDetectado) * 100}MB bônus = ${parseInt(valor) + (parseInt(tipoPacoteDetectado) * 100)}MB!`;
 
                             await client.sendMessage(grupoId, mensagemNotificacao);
                             console.log(`📢 Notificação de pacote automático enviada ao grupo!`);
@@ -3532,7 +3843,7 @@ async function enviarParaTasker(referencia, valor, numero, grupoId, autorMensage
 
         return {
             sucesso: false,
-            erro: resultado?.erro || 'Falha ao enviar para Google Sheets após múltiplas tentativas',
+            erro: resultado?.erro || 'Falha ao enviar para API MariaDB após múltiplas tentativas',
             tentativas: maxTentativas
         };
     }
@@ -4126,42 +4437,63 @@ function agendarSalvamentoHistorico() {
 }
 
 async function registrarComprador(grupoId, numeroComprador, nomeContato, valorTransferencia) {
-    const agora = new Date();
-    const timestamp = agora.toISOString();
+    try {
+        // Enviar para API MariaDB
+        const response = await axios.post('http://localhost:3002/api/compradores', {
+            grupo_id: grupoId,
+            numero: numeroComprador,
+            nome: nomeContato,
+            megas: parseInt(valorTransferencia) || 0
+        }, {
+            timeout: 5000
+        });
 
-    if (!historicoCompradores[grupoId]) {
-        historicoCompradores[grupoId] = {
-            nomeGrupo: getConfiguracaoGrupo(grupoId)?.nome || 'Grupo Desconhecido',
-            compradores: {}
-        };
+        if (response.data.success) {
+            console.log(`💰 Comprador registrado no MariaDB: ${nomeContato} (${numeroComprador}) - ${valorTransferencia}MB`);
+        } else {
+            console.error(`❌ Erro ao registrar comprador: ${response.data.error}`);
+        }
+    } catch (error) {
+        console.error(`❌ Erro ao registrar comprador no MariaDB: ${error.message}`);
+
+        // Fallback: salvar no JSON local (backup)
+        const agora = new Date();
+        const timestamp = agora.toISOString();
+
+        if (!historicoCompradores[grupoId]) {
+            historicoCompradores[grupoId] = {
+                nomeGrupo: getConfiguracaoGrupo(grupoId)?.nome || 'Grupo Desconhecido',
+                compradores: {}
+            };
+        }
+
+        if (!historicoCompradores[grupoId].compradores[numeroComprador]) {
+            historicoCompradores[grupoId].compradores[numeroComprador] = {
+                primeiraCompra: timestamp,
+                ultimaCompra: timestamp,
+                totalCompras: 1,
+                nomeContato: nomeContato,
+                historico: []
+            };
+        } else {
+            historicoCompradores[grupoId].compradores[numeroComprador].ultimaCompra = timestamp;
+            historicoCompradores[grupoId].compradores[numeroComprador].totalCompras++;
+            historicoCompradores[grupoId].compradores[numeroComprador].nomeContato = nomeContato;
+        }
+
+        historicoCompradores[grupoId].compradores[numeroComprador].historico.push({
+            data: timestamp,
+            valor: valorTransferencia
+        });
+
+        if (historicoCompradores[grupoId].compradores[numeroComprador].historico.length > 10) {
+            historicoCompradores[grupoId].compradores[numeroComprador].historico =
+                historicoCompradores[grupoId].compradores[numeroComprador].historico.slice(-10);
+        }
+
+        agendarSalvamentoHistorico();
+        console.log(`💾 Comprador registrado no JSON (fallback): ${nomeContato} (${numeroComprador}) - ${valorTransferencia}MB`);
     }
-
-    if (!historicoCompradores[grupoId].compradores[numeroComprador]) {
-        historicoCompradores[grupoId].compradores[numeroComprador] = {
-            primeiraCompra: timestamp,
-            ultimaCompra: timestamp,
-            totalCompras: 1,
-            nomeContato: nomeContato,
-            historico: []
-        };
-    } else {
-        historicoCompradores[grupoId].compradores[numeroComprador].ultimaCompra = timestamp;
-        historicoCompradores[grupoId].compradores[numeroComprador].totalCompras++;
-        historicoCompradores[grupoId].compradores[numeroComprador].nomeContato = nomeContato;
-    }
-
-    historicoCompradores[grupoId].compradores[numeroComprador].historico.push({
-        data: timestamp,
-        valor: valorTransferencia
-    });
-
-    if (historicoCompradores[grupoId].compradores[numeroComprador].historico.length > 10) {
-        historicoCompradores[grupoId].compradores[numeroComprador].historico =
-            historicoCompradores[grupoId].compradores[numeroComprador].historico.slice(-10);
-    }
-
-    agendarSalvamentoHistorico();
-    console.log(`💰 Comprador registrado: ${nomeContato} (${numeroComprador}) - ${valorTransferencia}MT`);
 }
 
 // === FILA DE MENSAGENS ===
@@ -4191,8 +4523,8 @@ client.on('loading_screen', (percent, message) => {
 client.on('ready', async () => {
     console.log('✅ Bot conectado e pronto!');
     console.log('🧠 IA WhatsApp ativa!');
-    console.log('📊 Google Sheets configurado!');
-    console.log(`🔗 URL: ${GOOGLE_SHEETS_CONFIG.scriptUrl}`);
+    console.log('📊 API MariaDB configurado!');
+    console.log(`🔗 URL: ${API_PEDIDOS_CONFIG.scriptUrl}`);
     console.log('🤖 Bot Retalho - Lógica simples igual ao Bot Atacado!');
 
     // Verificar se acabou de reiniciar e notificar grupos
@@ -4205,7 +4537,7 @@ client.on('ready', async () => {
 
     // === INICIALIZAR SISTEMA DE RELATÓRIOS ===
     try {
-        global.sistemaRelatorios = new SistemaRelatorios(client, GOOGLE_SHEETS_CONFIG, PAGAMENTOS_CONFIG);
+        global.sistemaRelatorios = new SistemaRelatorios(client, API_PEDIDOS_CONFIG, API_PAGAMENTOS_CONFIG);
 
         // Carregar configurações salvas
         await global.sistemaRelatorios.carregarConfiguracoes();
@@ -4281,7 +4613,14 @@ client.on('ready', async () => {
     // Salvar dados sincronizados
     await sistemaBonus.salvarDados();
     console.log('✅ Sincronização concluída e salva!');
-    
+
+    // === CONFIGURAR PREMIAÇÃO DO MELHOR COMPRADOR DO DIA ===
+    sistemaCompras.setClient(client);
+    sistemaCompras.setSistemaBonus(sistemaBonus);
+    sistemaCompras.setGruposAtivos(Object.keys(CONFIGURACAO_GRUPOS));
+    sistemaCompras.iniciarAgendamentoPremiacaoDiaria();
+    console.log('🏆 Sistema de Premiação do Melhor Comprador ATIVADO (22:00)');
+
     await carregarHistorico();
     
     console.log('\n🤖 Monitorando grupos:');
@@ -4290,7 +4629,7 @@ client.on('ready', async () => {
         console.log(`   📋 ${config.nome} (${grupoId})`);
     });
     
-    console.log('\n🔧 Comandos admin: .ia .stats .sheets .test_sheets .test_grupo .grupos_status .grupos .grupo_atual .addcomando .comandos .delcomando .addgatilho .gatilhos .delgatilho .test_vision .ranking .inativos .detetives .semcompra .resetranking .bonus .testreferencia .config-relatorio .list-relatorios .remove-relatorio .test-relatorio');
+    console.log('\n🔧 Comandos admin: .ia .stats .sheets .test_sheets .test_grupo .grupos_status .grupos .grupo_atual .addcomando .comandos .delcomando .addgatilho .gatilhos .delgatilho .test_vision .ranking .rankingdia .rankingsemana .rankingmes .inativos .detetives .semcompra .resetranking .bonus .testreferencia .config-relatorio .list-relatorios .remove-relatorio .test-relatorio');
 
     // Monitoramento de novos membros DESATIVADO
     console.log('⏸️ Monitoramento automático de novos membros DESATIVADO');
@@ -4654,16 +4993,27 @@ async function processMessage(message) {
                         const partes = message.body.trim().split(' ');
 
                         if (partes.length < 4) {
-                            await message.reply(`❌ *USO INCORRETO*\n\n✅ **Formato correto:**\n*.pacote DIAS REF NUMERO*\n\n📝 **Exemplos:**\n• *.pacote 3 ABC123 845123456*\n• *.pacote 30 XYZ789 847654321*\n\n📦 **Tipos disponíveis:**\n• 3 - Pacote de 3 dias (300MB)\n• 5 - Pacote de 5 dias (500MB)\n• 15 - Pacote de 15 dias (1.5GB)\n• 30 - Pacote de 30 dias (3GB)`);
+                            await message.reply(`❌ *USO INCORRETO*\n\n✅ **Formato correto:**\n*.pacote DIAS REF NUMERO*\n\n📝 **Exemplos:**\n• *.pacote 3 ABC123 845123456*\n• *.pacote 5 XYZ789 847654321*\n• *.pacote 15 DEF456 841234567*\n\n📦 **Dias disponíveis:** 3, 5, 15, 30\n\n🌍 **Formatos de número aceitos:**\n• 845123456\n• +258 845 123 456\n• 258845123456\n\n⚠️ **IMPORTANTE:**\nEste comando serve APENAS para agendar renovações automáticas.\nVocê deve ter enviado o pacote principal MANUALMENTE antes de usar este comando.\n\n🔄 O sistema agendará renovações diárias de 100MB durante o período especificado.`);
                             return;
                         }
 
-                        const [, diasPacote, referencia, numero] = partes;
+                        const [, diasPacote, referencia, numeroInput] = partes;
+                        const numero = normalizarNumeroTelefone(numeroInput);
                         const grupoId = message.from;
 
-                        console.log(`📦 COMANDO PACOTE: Dias=${diasPacote}, Ref=${referencia}, Numero=${numero}`);
+                        if (!numero || numero.length !== 9) {
+                            await message.reply(`❌ *NÚMERO INVÁLIDO*\n\nAceita formatos:\n• 845123456\n• +258 845 123 456\n• 258845123456`);
+                            return;
+                        }
 
-                        const resultado = await sistemaPacotes.processarComprovante(referencia, numero, grupoId, diasPacote);
+                        console.log(`📦 COMANDO PACOTE: Dias=${diasPacote}, Ref=${referencia}, NumeroInput=${numeroInput}, NumeroNormalizado=${numero}`);
+
+                        // Modo manual: não precisa de megas/valor inicial (apenas agenda renovações)
+                        // Usar valores simbólicos (não serão enviados, apenas para registro)
+                        const megasIniciais = 0; // Não usado em modo manual
+                        const valorMTInicial = 0; // Não usado em modo manual
+
+                        const resultado = await sistemaPacotes.processarComprovante(referencia, numero, grupoId, diasPacote, megasIniciais, valorMTInicial, true); // true = modo manual
 
                         if (resultado.sucesso) {
                             await message.reply(resultado.mensagem);
@@ -4720,13 +5070,20 @@ async function processMessage(message) {
                 // .validade NUMERO - Verificar validade do pacote (comando para CLIENTES)
                 if (comando.startsWith('.validade ')) {
                     const partes = message.body.trim().split(' ');
-                    
+
                     if (partes.length < 2) {
-                        await message.reply(`❌ *USO INCORRETO*\n\n✅ **Formato correto:**\n*.validade NUMERO*\n\n📝 **Exemplo:**\n• *.validade 845123456*\n\n💡 Digite seu número para verificar a validade do seu pacote de 100MB diários.`);
+                        await message.reply(`❌ *USO INCORRETO*\n\n✅ **Formato correto:**\n*.validade NUMERO*\n\n📝 **Exemplo:**\n• *.validade 845123456*\n\n💡 Digite seu número para verificar a validade do seu pacote de 100MB diários.\n\n🌍 Aceita formatos: 845123456, +258 845 123 456, 258845123456`);
                         return;
                     }
-                    
-                    const numero = partes[1];
+
+                    const numeroInput = partes[1];
+                    const numero = normalizarNumeroTelefone(numeroInput);
+
+                    if (!numero || numero.length !== 9) {
+                        await message.reply(`❌ *NÚMERO INVÁLIDO*\n\nAceita formatos:\n• 845123456\n• +258 845 123 456\n• 258845123456`);
+                        return;
+                    }
+
                     const resultado = sistemaPacotes.verificarValidadePacote(numero);
                     
                     await message.reply(resultado);
@@ -4856,7 +5213,172 @@ async function processMessage(message) {
                         return;
                     }
                 }
-                
+
+                // .rankingdia - Mostrar ranking do dia
+                if (comando === '.rankingdia') {
+                    try {
+                        await sistemaCompras.atualizarRankingDiarioGrupo(message.from);
+                        const top5 = await sistemaCompras.obterTop5CompradoresDia(message.from);
+                        const estatisticas = await sistemaCompras.obterEstatisticasDiariasGrupo(message.from);
+
+                        if (!top5 || top5.length === 0) {
+                            await message.reply(`🌟 *RANKING DO DIA*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n🚫 Nenhuma compra registrada hoje.`);
+                            return;
+                        }
+
+                        let mensagem = `🌟 *RANKING DO DIA*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+                        let mentions = [];
+
+                        for (let i = 0; i < top5.length; i++) {
+                            const item = top5[i];
+                            const participantId = item.numero;
+
+                            try {
+                                const contact = await client.getContactById(participantId);
+                                const nomeExibicao = contact.name || contact.pushname || item.numero;
+                                const posicaoEmoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`;
+                                const megasFormatados = (item.megasDia || 0) >= 1024 ?
+                                    `${((item.megasDia || 0)/1024).toFixed(1)}GB` : `${item.megasDia || 0}MB`;
+
+                                const mentionId = String(participantId).replace('@c.us', '').replace('@lid', '');
+                                mensagem += `${posicaoEmoji} @${mentionId}\n`;
+                                mensagem += `   💾 ${megasFormatados} hoje (${item.comprasDia || 0}x)\n\n`;
+                                mentions.push(participantId);
+                            } catch (error) {
+                                const posicaoEmoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`;
+                                const megasFormatados = (item.megasDia || 0) >= 1024 ?
+                                    `${((item.megasDia || 0)/1024).toFixed(1)}GB` : `${item.megasDia || 0}MB`;
+                                const mentionId = String(participantId).replace('@c.us', '').replace('@lid', '');
+                                mensagem += `${posicaoEmoji} @${mentionId}\n`;
+                                mensagem += `   💾 ${megasFormatados} hoje (${item.comprasDia || 0}x)\n\n`;
+                                mentions.push(participantId);
+                            }
+                        }
+
+                        const totalMegas = estatisticas.totalMegasDia >= 1024 ?
+                            `${(estatisticas.totalMegasDia/1024).toFixed(1)}GB` : `${estatisticas.totalMegasDia}MB`;
+                        mensagem += `📊 *Total do dia: ${totalMegas} (${estatisticas.totalComprasDia} compras)*`;
+
+                        const mentionsValidos = mentions.filter(id => id && typeof id === 'string' && (id.includes('@lid') || id.includes('@c.us')));
+                        await client.sendMessage(message.from, mensagem, { mentions: mentionsValidos });
+                        return;
+                    } catch (error) {
+                        console.error('❌ Erro ao obter ranking do dia:', error);
+                        await message.reply(`❌ Erro ao obter ranking do dia: ${error.message}`);
+                        return;
+                    }
+                }
+
+                // .rankingsemana - Mostrar ranking da semana
+                if (comando === '.rankingsemana') {
+                    try {
+                        await sistemaCompras.atualizarRankingSemanalGrupo(message.from);
+                        const top5 = await sistemaCompras.obterTop5CompradoresTodaSemana(message.from);
+                        const estatisticas = await sistemaCompras.obterEstatisticasSemanaisGrupo(message.from);
+
+                        if (!top5 || top5.length === 0) {
+                            await message.reply(`⭐ *RANKING DA SEMANA*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n🚫 Nenhuma compra registrada esta semana.`);
+                            return;
+                        }
+
+                        let mensagem = `⭐ *RANKING DA SEMANA*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+                        let mentions = [];
+
+                        for (let i = 0; i < top5.length; i++) {
+                            const item = top5[i];
+                            const participantId = item.numero;
+
+                            try {
+                                const contact = await client.getContactById(participantId);
+                                const nomeExibicao = contact.name || contact.pushname || item.numero;
+                                const posicaoEmoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`;
+                                const megasFormatados = (item.megasSemana || 0) >= 1024 ?
+                                    `${((item.megasSemana || 0)/1024).toFixed(1)}GB` : `${item.megasSemana || 0}MB`;
+
+                                const mentionId = String(participantId).replace('@c.us', '').replace('@lid', '');
+                                mensagem += `${posicaoEmoji} @${mentionId}\n`;
+                                mensagem += `   💾 ${megasFormatados} esta semana (${item.comprasSemana || 0}x)\n\n`;
+                                mentions.push(participantId);
+                            } catch (error) {
+                                const posicaoEmoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`;
+                                const megasFormatados = (item.megasSemana || 0) >= 1024 ?
+                                    `${((item.megasSemana || 0)/1024).toFixed(1)}GB` : `${item.megasSemana || 0}MB`;
+                                const mentionId = String(participantId).replace('@c.us', '').replace('@lid', '');
+                                mensagem += `${posicaoEmoji} @${mentionId}\n`;
+                                mensagem += `   💾 ${megasFormatados} esta semana (${item.comprasSemana || 0}x)\n\n`;
+                                mentions.push(participantId);
+                            }
+                        }
+
+                        const totalMegas = estatisticas.totalMegasSemana >= 1024 ?
+                            `${(estatisticas.totalMegasSemana/1024).toFixed(1)}GB` : `${estatisticas.totalMegasSemana}MB`;
+                        mensagem += `📊 *Total da semana: ${totalMegas} (${estatisticas.totalComprasSemana} compras)*`;
+
+                        const mentionsValidos = mentions.filter(id => id && typeof id === 'string' && (id.includes('@lid') || id.includes('@c.us')));
+                        await client.sendMessage(message.from, mensagem, { mentions: mentionsValidos });
+                        return;
+                    } catch (error) {
+                        console.error('❌ Erro ao obter ranking da semana:', error);
+                        await message.reply(`❌ Erro ao obter ranking da semana: ${error.message}`);
+                        return;
+                    }
+                }
+
+                // .rankingmes - Mostrar ranking do mês
+                if (comando === '.rankingmes') {
+                    try {
+                        await sistemaCompras.atualizarRankingMensalGrupo(message.from);
+                        const top5 = await sistemaCompras.obterTop5CompradoresMes(message.from);
+                        const estatisticas = await sistemaCompras.obterEstatisticasMensaisGrupo(message.from);
+
+                        if (!top5 || top5.length === 0) {
+                            await message.reply(`📆 *RANKING DO MÊS*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n🚫 Nenhuma compra registrada este mês.`);
+                            return;
+                        }
+
+                        let mensagem = `📆 *RANKING DO MÊS*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+                        let mentions = [];
+
+                        for (let i = 0; i < top5.length; i++) {
+                            const item = top5[i];
+                            const participantId = item.numero;
+
+                            try {
+                                const contact = await client.getContactById(participantId);
+                                const nomeExibicao = contact.name || contact.pushname || item.numero;
+                                const posicaoEmoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`;
+                                const megasFormatados = (item.megasMes || 0) >= 1024 ?
+                                    `${((item.megasMes || 0)/1024).toFixed(1)}GB` : `${item.megasMes || 0}MB`;
+
+                                const mentionId = String(participantId).replace('@c.us', '').replace('@lid', '');
+                                mensagem += `${posicaoEmoji} @${mentionId}\n`;
+                                mensagem += `   💾 ${megasFormatados} este mês (${item.comprasMes || 0}x)\n\n`;
+                                mentions.push(participantId);
+                            } catch (error) {
+                                const posicaoEmoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`;
+                                const megasFormatados = (item.megasMes || 0) >= 1024 ?
+                                    `${((item.megasMes || 0)/1024).toFixed(1)}GB` : `${item.megasMes || 0}MB`;
+                                const mentionId = String(participantId).replace('@c.us', '').replace('@lid', '');
+                                mensagem += `${posicaoEmoji} @${mentionId}\n`;
+                                mensagem += `   💾 ${megasFormatados} este mês (${item.comprasMes || 0}x)\n\n`;
+                                mentions.push(participantId);
+                            }
+                        }
+
+                        const totalMegas = estatisticas.totalMegasMes >= 1024 ?
+                            `${(estatisticas.totalMegasMes/1024).toFixed(1)}GB` : `${estatisticas.totalMegasMes}MB`;
+                        mensagem += `📊 *Total do mês: ${totalMegas} (${estatisticas.totalComprasMes} compras)*`;
+
+                        const mentionsValidos = mentions.filter(id => id && typeof id === 'string' && (id.includes('@lid') || id.includes('@c.us')));
+                        await client.sendMessage(message.from, mensagem, { mentions: mentionsValidos });
+                        return;
+                    } catch (error) {
+                        console.error('❌ Erro ao obter ranking do mês:', error);
+                        await message.reply(`❌ Erro ao obter ranking do mês: ${error.message}`);
+                        return;
+                    }
+                }
+
                 // .inativos - Mostrar membros do grupo que NUNCA compraram
                 if (comando === '.inativos') {
                     try {
@@ -5561,14 +6083,14 @@ async function processMessage(message) {
 
             // === COMANDOS GOOGLE SHEETS ===
             if (comando === '.test_sheets') {
-                console.log(`🧪 Testando Google Sheets...`);
+                console.log(`🧪 Testando API MariaDB...`);
                 
                 const resultado = await enviarParaGoogleSheets('TEST123', '99', '842223344', 'test_group', 'Teste Admin', 'TestUser');
                 
                 if (resultado.sucesso) {
-                    await message.reply(`✅ *Google Sheets funcionando!*\n\n📊 URL: ${GOOGLE_SHEETS_CONFIG.scriptUrl}\n📝 Row: ${resultado.row}\n🎉 Dados enviados com sucesso!`);
+                    await message.reply(`✅ *API MariaDB funcionando!*\n\n📊 URL: ${API_PEDIDOS_CONFIG.scriptUrl}\n📝 Row: ${resultado.row}\n🎉 Dados enviados com sucesso!`);
                 } else {
-                    await message.reply(`❌ *Google Sheets com problema!*\n\n📊 URL: ${GOOGLE_SHEETS_CONFIG.scriptUrl}\n⚠️ Erro: ${resultado.erro}\n\n🔧 *Verifique:*\n• Script publicado corretamente\n• Permissões do Google Sheets\n• Internet funcionando`);
+                    await message.reply(`❌ *API MariaDB com problema!*\n\n📊 URL: ${API_PEDIDOS_CONFIG.scriptUrl}\n⚠️ Erro: ${resultado.erro}\n\n🔧 *Verifique:*\n• Script publicado corretamente\n• Permissões do API MariaDB\n• Internet funcionando`);
                 }
                 return;
             }
@@ -6287,7 +6809,7 @@ async function processMessage(message) {
                     return;
                 }
 
-                console.log(`🧪 Testando Google Sheets para grupo: ${configGrupo.nome}`);
+                console.log(`🧪 Testando API MariaDB para grupo: ${configGrupo.nome}`);
                 
                 const resultado = await enviarParaGoogleSheets('TEST999', '88', '847777777', grupoAtual, configGrupo.nome, 'TestAdmin');
                 
@@ -6330,7 +6852,7 @@ async function processMessage(message) {
                 let resposta = `📊 *GOOGLE SHEETS STATUS*\n⚠ NB: Válido apenas para Vodacom━━━━━━━━\n\n`;
                 resposta += `📈 Total enviado: ${dados.length}\n`;
                 resposta += `📅 Hoje: ${hoje.length}\n`;
-                resposta += `📊 Via Google Sheets: ${sheets}\n`;
+                resposta += `📊 Via API MariaDB: ${sheets}\n`;
                 resposta += `📱 Via WhatsApp: ${whatsapp}\n\n`;
                 // REMOVIDO: Fila de encaminhamento (sistema movido para outro bot)
                 
@@ -6474,14 +6996,15 @@ async function processMessage(message) {
                     await message.reply('❌ Sistema de compras não está ativo!');
                     return;
                 }
-                
-                const numero = comando.replace('.comprador ', '').trim();
-                
-                if (!/^\d{9}$/.test(numero)) {
-                    await message.reply('❌ Use: *.comprador 849123456*');
+
+                const numeroInput = comando.replace('.comprador ', '').trim();
+                const numero = normalizarNumeroTelefone(numeroInput);
+
+                if (!numero || numero.length !== 9) {
+                    await message.reply('❌ Use: *.comprador 849123456*\nAceita formatos: 849123456, +258 849 123 456, 258849123456');
                     return;
                 }
-                
+
                 const cliente = sistemaCompras.historicoCompradores[numero];
                 
                 if (!cliente) {
@@ -7210,7 +7733,7 @@ async function processMessage(message) {
                                     `👤 Cliente: ${nomeClienteSeguro}\n` +
                                     `💰 Valor: ${quantidadeMB}MB\n\n` +
                                     `✅ Saldo restaurado.\n` +
-                                    `🔧 Verifique Google Sheets.`
+                                    `🔧 Verifique API MariaDB.`
                                 );
                                 console.log(`📧 Notificação enviada ao admin`);
                             }
@@ -7341,6 +7864,12 @@ async function processMessage(message) {
             const isPularModeracao = isComandoAdmin && isAdminExecutando;
 
             if (!isPularModeracao) {
+                // Verificar Anti-Spam primeiro
+                const ehSpam = await verificarAntiSpam(message, client);
+                if (ehSpam) {
+                    return; // Spam detectado e tratado
+                }
+
                 const analise = contemConteudoSuspeito(message.body);
 
                 if (analise.suspeito) {
@@ -7722,7 +8251,7 @@ async function processMessage(message) {
                 }
 
                 // Continuar fluxo normal (pedidos comuns)
-                const resultadoEnvio = await enviarParaTasker(referencia, megas, numero, message.from, autorMensagem);
+                const resultadoEnvio = await enviarParaTasker(referencia, megas, numero, message.from, autorMensagem, valorComprovante);
 
                 // Verificar se é pedido duplicado
                 if (resultadoEnvio && resultadoEnvio.duplicado) {
@@ -7854,7 +8383,7 @@ async function processMessage(message) {
                 }
 
                 // Continuar fluxo normal (pedidos comuns)
-                const resultadoEnvio = await enviarParaTasker(referencia, megas, numero, message.from, autorMensagem);
+                const resultadoEnvio = await enviarParaTasker(referencia, megas, numero, message.from, autorMensagem, valorComprovante);
 
                 // Verificar se é pedido duplicado
                 if (resultadoEnvio && resultadoEnvio.duplicado) {
@@ -7947,7 +8476,7 @@ async function processMessage(message) {
 
                     console.log(`📤 Enviando bloco ${i + 1}/${blocos.length}: ${refBloco} - ${megasBloco}MB`);
 
-                    const resultadoEnvio = await enviarParaTasker(refBloco, megasBloco, numeroBloco, message.from, autorMensagem);
+                    const resultadoEnvio = await enviarParaTasker(refBloco, megasBloco, numeroBloco, message.from, autorMensagem, valorComprovante);
 
                     if (resultadoEnvio && resultadoEnvio.sucesso) {
                         sucessos++;
@@ -7989,6 +8518,12 @@ async function processMessage(message) {
         }
 
         // === TRATAMENTO DE ERROS ===
+        if (resultadoIA.tipo === 'numero_nao_vodacom') {
+            console.log(`❌ Número não Vodacom rejeitado: ${resultadoIA.numerosRejeitados?.join(', ')}`);
+            await message.reply(resultadoIA.mensagem);
+            return;
+        }
+
         if (resultadoIA.tipo === 'numeros_sem_comprovante') {
             await message.reply(
                 `📱 *Número detectado*\n\n` +
@@ -8168,8 +8703,8 @@ process.on('SIGINT', async () => {
     }
 
     console.log('🧠 IA: ATIVA');
-    console.log('📊 Google Sheets: CONFIGURADO');
-    console.log(`🔗 URL: ${GOOGLE_SHEETS_CONFIG.scriptUrl}`);
+    console.log('📊 API MariaDB: CONFIGURADO');
+    console.log(`🔗 URL: ${API_PEDIDOS_CONFIG.scriptUrl}`);
     console.log('🤖 Bot Retalho - Funcionamento otimizado');
     console.log(ia.getStatus());
     process.exit(0);

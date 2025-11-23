@@ -694,13 +694,13 @@ Se não conseguires extrair os dados:
     // Suporta formatos como: 258852118624, 258 852 118 624, +258852118624
     numeroLimpo = numeroLimpo.replace(/^258/, '');
 
-    // Retorna apenas se for um número válido de 9 dígitos começando com 8
-    if (/^8[0-9]{8}$/.test(numeroLimpo)) {
+    // Retorna apenas se for um número válido de 9 dígitos VODACOM (84 ou 85)
+    if (/^8[45][0-9]{7}$/.test(numeroLimpo)) {
       return numeroLimpo;
     }
 
-    // Se não conseguiu normalizar, tentar extrair apenas os 9 últimos dígitos se começar com 8
-    const match = numeroLimpo.match(/8[0-9]{8}/);
+    // Se não conseguiu normalizar, tentar extrair apenas os 9 dígitos VODACOM
+    const match = numeroLimpo.match(/8[45][0-9]{7}/);
     if (match) {
       return match[0];
     }
@@ -725,17 +725,19 @@ Se não conseguires extrair os dados:
 
     // console.log(`   📝 LEGENDA: Limpa "${legendaLimpa}"`);
 
-    // NOVOS PADRÕES DE DETECÇÃO:
-    // 1. Números com espaços: 85 211 8624 ou 848 715 208
+    // PADRÕES DE DETECÇÃO - APENAS VODACOM (84 e 85):
+    // Números de outras operadoras (86, 87, etc.) são ignorados - não podem receber megas
+    // 1. Números com espaços: 85 211 8624 ou 84 871 5208
     // 2. Números com +258: +258852118624 ou +258 85 211 8624
-    // 3. Números com 258: 25852118624 ou 258 85 211 8624
-    // 4. Números normais: 852118624
+    // 3. Números com 258: 258852118624 ou 258 85 211 8624
+    // 4. Números normais: 852118624, 848715208
     const padroes = [
-      /(?:\+?\s*258\s*)?8\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]/g,  // 258 8 5 2 1 1 8 6 2 4 ou 8 5 2 1 1 8 6 2 4
-      /\+?\s*258\s*8[0-9]\s*[0-9]{3}\s*[0-9]{4}/g,           // +258 85 211 8624 (com espaços variados)
-      /(?<!\d)\+?258\s*8[0-9]{8}(?!\d)/g,                    // +258852118624 ou 258852118624 (junto)
-      /\b8[0-9]\s*[0-9]{3}\s*[0-9]{4}\b/g,                   // 85 211 8624 (com espaços variados)
-      /\b8[0-9]{8}\b/g                                        // 852118624 (padrão normal)
+      /(?:\+?\s*258\s*)?8\s*[45]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]/g,  // 258 8 5 2 1 1 8 6 2 4 ou 8 4 8 7 1 5 2 0 8
+      /\+?\s*258\s*8[45]\s*[0-9]{3}\s*[0-9]{4}/g,           // +258 85 211 8624 (com espaços variados)
+      /(?<!\d)\+?258\s*8[45][0-9]{7}(?!\d)/g,               // +258852118624 ou 258848715208 (junto)
+      /\b8[45]\s*[0-9]{2}\s*[0-9]{2}\s*[0-9]{3}\b/g,        // 84 78 49 481 (formato XX XX XXX)
+      /\b8[45]\s*[0-9]{3}\s*[0-9]{4}\b/g,                   // 85 211 8624 ou 84 871 5208 (com espaços variados)
+      /\b8[45][0-9]{7}\b/g                                   // 852118624, 848715208 (padrão normal)
     ];
 
     const numerosEncontrados = [];
@@ -754,20 +756,20 @@ Se não conseguires extrair os dados:
 
     console.log(`   📱 LEGENDA: Números brutos encontrados: ${numerosEncontrados.join(', ')}`);
 
-    // Normalizar todos os números encontrados
-    const numerosNormalizados = new Set();
+    // Normalizar todos os números encontrados e manter mapeamento com original
+    const numerosNormalizados = new Map(); // numero normalizado -> numero original
     for (const numeroRaw of numerosEncontrados) {
       const numeroNormalizado = this.normalizarNumero(numeroRaw);
       if (numeroNormalizado) {
-        numerosNormalizados.add(numeroNormalizado);
+        numerosNormalizados.set(numeroNormalizado, numeroRaw);
       }
     }
 
     const numerosValidos = [];
 
-    for (const numero of numerosNormalizados) {
+    for (const [numero, numeroOriginal] of numerosNormalizados.entries()) {
       // Procurar o número original na legenda para análise de contexto
-      const posicao = legendaLimpa.indexOf(numero);
+      const posicao = legendaLimpa.indexOf(numeroOriginal);
       const comprimentoLegenda = legendaLimpa.length;
       
       // Análise de número removida para privacidade
@@ -852,6 +854,59 @@ Se não conseguires extrair os dados:
   }
 
   // === EXTRAIR NÚMEROS DE TEXTO (MELHORADO) ===
+  // Detectar números de outras operadoras (não Vodacom)
+  detectarNumerosNaoVodacom(mensagem) {
+    if (!mensagem || typeof mensagem !== 'string') return [];
+
+    // Padrões para detectar QUALQUER número moçambicano (8X com 9 dígitos)
+    const padroesGeral = [
+      /(?:\+?\s*258\s*)?8\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]/g,
+      /\b8[0-9]{8}\b/g
+    ];
+
+    const todosNumeros = [];
+    for (const padrao of padroesGeral) {
+      const matches = mensagem.match(padrao);
+      if (matches) todosNumeros.push(...matches);
+    }
+
+    // Filtrar apenas os que NÃO são Vodacom (não começam com 84 ou 85)
+    // E que estão ISOLADOS no final da mensagem (não são números de pagamento)
+    const numerosNaoVodacom = [];
+    const tamanhoMensagem = mensagem.length;
+
+    for (const numeroRaw of todosNumeros) {
+      const limpo = numeroRaw.replace(/[\s\-\.+]/g, '').replace(/^258/, '');
+      if (limpo.length >= 9 && /^8[^45]/.test(limpo)) {
+        // Verificar posição do número na mensagem
+        const posicao = mensagem.indexOf(numeroRaw);
+        const percentualPosicao = (posicao / tamanhoMensagem) * 100;
+
+        // Verificar contexto - ignorar números de pagamento
+        const contextoBefore = mensagem.substring(Math.max(0, posicao - 50), posicao).toLowerCase();
+        const indicadoresPagamento = [
+          'transferiste', 'recebeste', 'para conta', 'de conta',
+          'conta de', 'beneficiário', 'destinatario', 'nome:'
+        ];
+
+        const eNumeroPagamento = indicadoresPagamento.some(ind => contextoBefore.includes(ind));
+
+        // IGNORAR números que são de pagamento (M-Pesa/e-Mola)
+        if (eNumeroPagamento) {
+          continue; // Ignorar este número
+        }
+
+        // Só considerar como "número não Vodacom enviado pelo cliente" se:
+        // - Estiver no final da mensagem (>70%) E não for número de pagamento
+        if (percentualPosicao > 70) {
+          numerosNaoVodacom.push(limpo.slice(-9));
+        }
+      }
+    }
+
+    return [...new Set(numerosNaoVodacom)]; // Remover duplicados
+  }
+
   extrairTodosNumeros(mensagem) {
     // console.log(`   🔍 TEXTO: Extraindo números da mensagem...`);
 
@@ -860,17 +915,19 @@ Se não conseguires extrair os dados:
       return [];
     }
 
-    // NOVOS PADRÕES DE DETECÇÃO (mesmos da legenda):
-    // 1. Números com espaços: 85 211 8624 ou 848 715 208
+    // PADRÕES DE DETECÇÃO - APENAS VODACOM (84 e 85):
+    // Números de outras operadoras (86, 87, etc.) são ignorados - não podem receber megas
+    // 1. Números com espaços: 85 211 8624 ou 84 871 5208
     // 2. Números com +258: +258852118624 ou +258 85 211 8624
-    // 3. Números com 258: 25852118624 ou 258 85 211 8624
-    // 4. Números normais: 852118624
+    // 3. Números com 258: 258852118624 ou 258 85 211 8624
+    // 4. Números normais: 852118624, 848715208
     const padroes = [
-      /(?:\+?\s*258\s*)?8\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]/g,  // 258 8 5 2 1 1 8 6 2 4 ou 8 5 2 1 1 8 6 2 4
-      /\+?\s*258\s*8[0-9]\s*[0-9]{3}\s*[0-9]{4}/g,           // +258 85 211 8624 (com espaços variados)
-      /(?<!\d)\+?258\s*8[0-9]{8}(?!\d)/g,                    // +258852118624 ou 258852118624 (junto)
-      /\b8[0-9]\s*[0-9]{3}\s*[0-9]{4}\b/g,                   // 85 211 8624 (com espaços variados)
-      /\b8[0-9]{8}\b/g                                        // 852118624 (padrão normal)
+      /(?:\+?\s*258\s*)?8\s*[45]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]\s*[0-9]/g,  // 258 8 5 2 1 1 8 6 2 4 ou 8 4 8 7 1 5 2 0 8
+      /\+?\s*258\s*8[45]\s*[0-9]{3}\s*[0-9]{4}/g,           // +258 85 211 8624 (com espaços variados)
+      /(?<!\d)\+?258\s*8[45][0-9]{7}(?!\d)/g,               // +258852118624 ou 258848715208 (junto)
+      /\b8[45]\s*[0-9]{2}\s*[0-9]{2}\s*[0-9]{3}\b/g,        // 84 78 49 481 (formato XX XX XXX)
+      /\b8[45]\s*[0-9]{3}\s*[0-9]{4}\b/g,                   // 85 211 8624 ou 84 871 5208 (com espaços variados)
+      /\b8[45][0-9]{7}\b/g                                   // 852118624, 848715208 (padrão normal)
     ];
 
     const numerosEncontrados = [];
@@ -883,25 +940,25 @@ Se não conseguires extrair os dados:
     }
 
     if (numerosEncontrados.length === 0) {
-      console.log(`   ❌ TEXTO: Nenhum número encontrado`);
+      console.log(`   ❌ TEXTO: Nenhum número Vodacom encontrado`);
       return [];
     }
 
     console.log(`   📱 TEXTO: Números brutos encontrados: ${numerosEncontrados.join(', ')}`);
 
-    // Normalizar todos os números encontrados
-    const numerosNormalizados = new Set();
+    // Normalizar todos os números encontrados e manter mapeamento com original
+    const numerosNormalizados = new Map(); // numero normalizado -> numero original
     for (const numeroRaw of numerosEncontrados) {
       const numeroNormalizado = this.normalizarNumero(numeroRaw);
       if (numeroNormalizado) {
-        numerosNormalizados.add(numeroNormalizado);
+        numerosNormalizados.set(numeroNormalizado, numeroRaw);
       }
     }
 
     const numerosValidos = [];
 
-    for (const numero of numerosNormalizados) {
-      const posicao = mensagem.indexOf(numero);
+    for (const [numero, numeroOriginal] of numerosNormalizados.entries()) {
+      const posicao = mensagem.indexOf(numeroOriginal);
       const tamanhoMensagem = mensagem.length;
       const percentualPosicao = (posicao / tamanhoMensagem) * 100;
       
@@ -1455,17 +1512,30 @@ Se não conseguires extrair os dados:
 
     // MELHORAR DETECÇÃO: Verificar se é uma mensagem que contém apenas números
     const mensagemLimpa = mensagem.trim();
-    const apenasNumeroRegex = /^8[0-9]{8}$/; // Exatamente um número de 9 dígitos
-    const multiplosNumerosRegex = /^(8[0-9]{8}[\s,]*)+$/; // Múltiplos números separados por espaço ou vírgula
+    const apenasNumeroRegex = /^8[45][0-9]{7}$/; // Exatamente um número Vodacom de 9 dígitos
+    const multiplosNumerosRegex = /^(8[45][0-9]{7}[\s,]*)+$/; // Múltiplos números Vodacom
+    const numeroNaoVodacomRegex = /^8[^45][0-9]{7}$/; // Número de outra operadora
+    const multiplosNaoVodacomRegex = /^(8[^45][0-9]{7}[\s,]*)+$/; // Múltiplos não-Vodacom
 
     console.log(`   🔍 Verificando se é apenas número(s)...`);
-    // console.log(`   📝 Mensagem limpa: "${mensagemLimpa}"`);
+
+    // Verificar se é número de outra operadora (enviado sozinho)
+    if (numeroNaoVodacomRegex.test(mensagemLimpa) || multiplosNaoVodacomRegex.test(mensagemLimpa)) {
+      const numerosRejeitados = mensagemLimpa.match(/8[^45][0-9]{7}/g) || [];
+      console.log(`   ❌ NÚMERO NÃO VODACOM DETECTADO (sozinho): ${numerosRejeitados.join(', ')}`);
+      return {
+        sucesso: false,
+        tipo: 'numero_nao_vodacom',
+        numerosRejeitados: numerosRejeitados,
+        mensagem: `❌ *NÚMERO NÃO SUPORTADO*\n\nO número *${numerosRejeitados[0]}* não é da Vodacom.\n\n📱 Este serviço é exclusivo para números *Vodacom (84 e 85)*.\n\n✅ Por favor, envie um número que comece com:\n• *84*XXXXXXX\n• *85*XXXXXXX`
+      };
+    }
 
     if (apenasNumeroRegex.test(mensagemLimpa) || multiplosNumerosRegex.test(mensagemLimpa)) {
-      console.log(`   📱 DETECTADO: Mensagem contém apenas número(s)!`);
+      console.log(`   📱 DETECTADO: Mensagem contém apenas número(s) Vodacom!`);
 
-      // Extrair números da mensagem
-      const numerosDetectados = mensagemLimpa.match(/8[0-9]{8}/g) || [];
+      // Extrair números Vodacom da mensagem
+      const numerosDetectados = mensagemLimpa.match(/8[45][0-9]{7}/g) || [];
       console.log(`   📱 Números detectados: ${numerosDetectados.length}`);
 
       if (numerosDetectados.length > 0) {
@@ -1475,13 +1545,34 @@ Se não conseguires extrair os dados:
     
     // LÓGICA ORIGINAL: Separar comprovante e números
     const { textoComprovante, numeros } = this.separarComprovanteENumeros(mensagem);
-    
-    // 1. Verificar se é um comprovante
+
+    // 1. Verificar se é um comprovante PRIMEIRO
     let comprovante = null;
     if (textoComprovante && textoComprovante.length > 10) {
       comprovante = await this.analisarComprovante(textoComprovante);
     }
-    
+
+    // VERIFICAR SE HÁ NÚMEROS DE OUTRAS OPERADORAS (não Vodacom)
+    const numerosNaoVodacom = this.detectarNumerosNaoVodacom(mensagem);
+    if (numerosNaoVodacom.length > 0 && numeros.length === 0) {
+      console.log(`   ❌ NÚMERO NÃO VODACOM DETECTADO: ${numerosNaoVodacom.join(', ')}`);
+
+      // Se há comprovante válido, o número não-Vodacom é provavelmente do pagamento (M-Pesa/e-Mola)
+      // Neste caso, pedir para enviar o número Vodacom destinatário
+      if (comprovante) {
+        console.log(`   💰 Comprovante detectado com número de pagamento não-Vodacom`);
+        // Continuar para o fluxo normal de "comprovante sem número"
+      } else {
+        // Sem comprovante, rejeitar o número não-Vodacom
+        return {
+          sucesso: false,
+          tipo: 'numero_nao_vodacom',
+          numerosRejeitados: numerosNaoVodacom,
+          mensagem: `❌ *NÚMERO NÃO SUPORTADO*\n\nO número *${numerosNaoVodacom[0]}* não é da Vodacom.\n\n📱 Este serviço é exclusivo para números *Vodacom (84 e 85)*.\n\n✅ Por favor, envie um número que comece com:\n• *84*XXXXXXX\n• *85*XXXXXXX`
+        };
+      }
+    }
+
     // 2. Se encontrou comprovante E números na mesma mensagem
     if (comprovante && numeros.length > 0) {
       console.log(`   🎯 COMPROVANTE + NÚMEROS na mesma mensagem!`);
@@ -1542,7 +1633,8 @@ Se não conseguires extrair os dados:
       // === VERIFICAR SE É PACOTE DIAMANTE ANTES DE CALCULAR MEGAS ===
       if (configGrupo) {
         const precos = this.extrairPrecosTabela(configGrupo.tabela);
-        const pacoteDiamante = precos.find(p => p.preco === comprovante.valor && p.isDiamante === true);
+        const valorNumerico = parseFloat(comprovante.valor);
+        const pacoteDiamante = precos.find(p => p.preco === valorNumerico && p.isDiamante === true);
 
         if (pacoteDiamante) {
           console.log(`   💎 DIAMANTE DETECTADO NA IA: ${pacoteDiamante.descricao} (${comprovante.valor}MT)`);
@@ -1841,6 +1933,54 @@ Se não conseguires ler a imagem ou extrair os dados:
         return await this.processarNumerosComDivisaoAutomatica(numeros, remetente, comprovante);
       }
       
+      // === VERIFICAR SE É PACOTE ESPECIAL ANTES DE CALCULAR MEGAS ===
+      if (configGrupo && numeros.length === 1) {
+        const precos = this.extrairPrecosTabela(configGrupo.tabela);
+        const valorNumerico = parseFloat(comprovante.valor);
+
+        // Verificar se é pacote .8GB
+        const pacotePonto8 = precos.find(p => p.preco === valorNumerico && p.isPacotePonto8 === true);
+        if (pacotePonto8) {
+          console.log(`   📦 PACOTE .8GB DETECTADO (comprovante em aberto): ${pacotePonto8.descricao} (${comprovante.valor}MT)`);
+          console.log(`   🔄 Retornando como comprovante_ponto8_detectado para usar fluxo especial`);
+
+          delete this.comprovantesEmAberto[remetente];
+
+          // Retornar no mesmo formato do fluxo imediato
+          return {
+            sucesso: true,
+            tipo: 'comprovante_ponto8_detectado',
+            referencia: comprovante.referencia,
+            valor: comprovante.valor,
+            valorComprovante: comprovante.valor,
+            numero: numeros[0],
+            pacoteDiamante: pacotePonto8,
+            mensagem: `📦 Pacote .8GB detectado: ${pacotePonto8.descricao}`
+          };
+        }
+
+        // Verificar se é pacote diamante
+        const pacoteDiamante = precos.find(p => p.preco === valorNumerico && p.isDiamante === true);
+        if (pacoteDiamante) {
+          console.log(`   💎 DIAMANTE DETECTADO (comprovante em aberto): ${pacoteDiamante.descricao} (${comprovante.valor}MT)`);
+
+          delete this.comprovantesEmAberto[remetente];
+
+          // Retornar indicação de pacote diamante para o index.js processar
+          return {
+            sucesso: true,
+            tipo: 'comprovante_diamante_detectado',
+            referencia: comprovante.referencia,
+            valor: comprovante.valor,
+            valorComprovante: comprovante.valor,
+            megas: pacoteDiamante.quantidade, // MB do pacote
+            numero: numeros[0], // Primeiro número
+            pacoteDiamante: pacoteDiamante,
+            mensagem: `💎 Pacote Diamante detectado: ${pacoteDiamante.descricao}`
+          };
+        }
+      }
+
       // Calcular megas totais baseado no valor e tabela do grupo
       const megasTotais = configGrupo ? this.calcularMegasPorValor(comprovante.valor, configGrupo.tabela) : comprovante.valor;
       const LIMITE_BLOCO = 10240; // 10GB
@@ -1880,6 +2020,7 @@ Se não conseguires ler a imagem ou extrair os dados:
           totalBlocos: divisao.totalBlocos,
           megasPorNumero: divisao.megasPorNumero,
           valorTotal: divisao.valorTotal,
+          valorComprovante: comprovante.valor,
           divisao: divisao,
           origem: 'comprovante_em_aberto_com_divisao'
         };
